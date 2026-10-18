@@ -18,6 +18,10 @@ apps/extension/media/
 .vscode-test/
 .test-workspace/
 
+# Corepack package-manager cache and pnpm content store (sandbox-local).
+.corepack-home/
+.pnpm-store/
+
 # Local working notes that must never be committed (see AGENTS.md).
 LOCAL_*.md
 .dsh
