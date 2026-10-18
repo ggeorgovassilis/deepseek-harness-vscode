@@ -2,14 +2,25 @@
 
 ## Unreleased
 
-- 降低会话打开、恢复和大目录搜索的等待：辅助信息独立加载，移除重复扫描；修复断连后旧数据回填，保留实时更新与切换隔离。
-- Reduces waits when opening or restoring chats and searching large directories through independent advisory loading and fewer repeated scans; prevents late reads from restoring disconnected data while preserving live updates and session isolation.
+- 修复编辑器区标签页标题在会话命名后不更新的问题：会话标题变化（含 DSH 自动命名）现在会同步到已打开的编辑器标签页，无需关闭再重开。
+- Fixes editor-tab titles not updating after a session is named: session title changes (including DSH auto-titling) now propagate to open editor tabs without closing and reopening them.
 
-- 统一表单、弹框和操作提示，精简设置与列表，保留完整详情和键盘滚动；修复短窗控件被挤出、弹框裁切、菜单焦点和保存时误关闭。
-- Unifies forms, dialogs and user-facing messages, compacts Settings and lists while retaining full details and keyboard scrolling, and fixes clipped controls, dialog clipping, menu focus and accidental dismissal during saves.
+- 修复新会话和设置页的 Agent 预设选择及 Creator 被错误禁用的问题；关闭 Developer Tools 或辅助设置读取失败不再阻断可用功能，仍保留上游能力和设置写入校验。
+- Fixes incorrectly disabled agent choices and Creator actions across new sessions and Settings. Developer Tools preferences and auxiliary settings failures no longer block available actions; upstream capabilities and settings-write checks remain authoritative.
 
-- 保留原会话列表，增加资源管理器中默认隐藏的原生会话列表，复用 Host 目录与操作并提供原生拖拽源，窄栏标题优先保留会话和设置；实际分栏效果待 VS Code 验收。
-- Keeps the existing switcher and adds a native session list hidden initially in Explorer sharing Host data and actions, with a native drag source and priority for Sessions and Settings in narrow title bars; live VS Code split behavior still needs acceptance.
+- 统一选择器样式并清理旧限宽覆盖；两种布局按字号和可用宽度整体分行，修复缩放后模型、统计和操作按钮错层，保留完整菜单。
+- Unifies selector styling and removes legacy width overrides. Both layouts reflow by font size and available width, fixing staggered model, context and action controls under scaling while preserving complete menus.
+
+## 0.3.3
+
+- 改善流式增量传递，修复突发输出和重复基线造成的停顿；减少会话切换、首发与搜索等待，移除发送和滚动跟随的固定延迟。
+- Improves incremental streaming through bursts and repeated baselines; reduces session-switch, first-send and search waits, and removes fixed send and scroll-follow delays.
+
+- 加快连接启动，auto 优先校验上次连接，减少重复发现；手动地址与端口严格生效，失败后可修改设置重试；修复断连旧数据回填和会话目录重复加载。
+- Speeds up startup with last-connection validation and less repeated discovery. Explicit targets stay strict and editable after failure; fixes stale reads after disconnect and repeated session-list loading.
+
+- 统一紧凑布局、表单与提示，修复裁切和焦点；连接页增加加载圈与可展开的四行日志，窄栏优先保留会话和设置。可从默认隐藏的原生会话列表拖拽分栏。
+- Unifies compact layouts, forms and messages; fixes clipping and focus, adds a loading ring with four-line expandable logs, and prioritizes Sessions and Settings in narrow views. Supports drag-to-split from the optional native session list, hidden initially.
 
 ## 0.3.2
 
