@@ -21,6 +21,8 @@
 
 The connected DSH version determines which advanced capabilities are available. Unsupported operations show a clear unavailable state. The [compatibility contract](docs/dsh-contract.md) lists exact adapter boundaries; the [capability matrix](docs/capability-matrix.md) summarizes supported functions, limitations and completion status.
 
+The optional [editor integration](packages/dsh-editor-bridge/README.md) is installed only when you choose **Settings → General → Editor integration → Install and enable companion**. Once enabled, it follows your selected session and extension updates, including F5 builds. It provides unsaved text/selection, diagnostics, language services, navigation and undoable edits. Settings offers off/read-only switches, retry, repair, restart and Undo. Runtime capabilities are negotiated independently; chat and manual context attachment remain available without the companion.
+
 ## Install and start
 
 Install [DeepSeek Harness Companion for VS Code](https://marketplace.visualstudio.com/items?itemName=Direwolf.deepseek-harness-client) from the Marketplace, or download a platform VSIX from the [latest GitHub Release](https://github.com/Jabofish/deepseek-harness-vscode/releases/latest) and use **Extensions: Install from VSIX...**.
@@ -32,6 +34,8 @@ Install [DeepSeek Harness Companion for VS Code](https://marketplace.visualstudi
 The DeepSeek Harness Chat view appears in VS Code's Secondary Side Bar by default (on the right in the default workbench layout). If you previously moved it, VS Code may keep your saved layout. Run **DSH: Move View to Secondary Side Bar** from the Command Palette to choose the Chat view and **New Secondary Side Bar Entry**, or right-click the view title and use **Move View**.
 
 The side bar stays available while editor chat tabs are open. Use the view title's **Sessions** button to switch or create a session. The native title bar shows its full controls when space permits; narrower views move lower-priority actions into **More**, keeping **Sessions** and **Settings** visible.
+
+**Open Web UI** uses VS Code's integrated browser by default. To use your system browser, set `dsh.webUi.browser` to `external` in VS Code Settings.
 
 To open an editor tab, choose **Open in Editor Area** or run **DSH: Open Chat in Editor Area** (`/moveto:editor`); `/moveto:sidebar` returns the chat. You can drag an opened editor tab to split. Dragging within a manually sorted session list still reorders sessions.
 

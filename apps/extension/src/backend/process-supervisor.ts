@@ -17,6 +17,7 @@ export interface SpawnedChild {
 }
 
 export interface ProcessSupervisorDependencies {
+  readonly additionalArguments?: (runtime: DshRuntime, signal: AbortSignal) => Promise<readonly string[]>
   readonly spawn: (
     executable: string,
     args: readonly string[],
@@ -39,6 +40,9 @@ interface ReadyEndpoint {
   readonly launchUrl?: string
 }
 
+// Cold plugin/profile loading on Windows can exceed 30 seconds. Endpoint
+// login remains a separate short step; cancellation still aborts either wait.
+const startupReadinessTimeoutMs = 60_000
 const startupStepTimeoutMs = 15_000
 
 export class DshProcessSupervisor implements ProcessSupervisor {
@@ -141,9 +145,14 @@ export class DshProcessSupervisor implements ProcessSupervisor {
       Number.isInteger(configuredPort) && configuredPort >= 0 && configuredPort <= 65535 ? configuredPort : 0
     let child: SpawnedChild
     try {
+      const extra =
+        this.dependencies.additionalArguments === undefined
+          ? []
+          : await this.dependencies.additionalArguments(runtime, signal)
+      throwIfCancelled(signal)
       child = this.dependencies.spawn(
         runtime.executable,
-        managedWebArguments(runtime.version, port),
+        [...extra, ...managedWebArguments(runtime.version, port)],
         this.dependencies.workingDirectory?.(),
         toolEnvironment(this.dependencies.toolMode?.(), runtime.version),
       )
@@ -216,7 +225,7 @@ export class DshProcessSupervisor implements ProcessSupervisor {
       return status
     })
     try {
-      const readyEndpoint = await withTimeout(ready, startupStepTimeoutMs, signal)
+      const readyEndpoint = await withTimeout(ready, startupReadinessTimeoutMs, signal)
       await awaitWithAbort(
         Promise.resolve(
           this.dependencies.onReadyEndpoint?.(readyEndpoint.endpoint, readyEndpoint.launchUrl, signal),

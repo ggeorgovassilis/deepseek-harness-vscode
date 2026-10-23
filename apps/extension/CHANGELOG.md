@@ -2,14 +2,145 @@
 
 ## Unreleased
 
-- 修复编辑器区标签页标题在会话命名后不更新的问题：会话标题变化（含 DSH 自动命名）现在会同步到已打开的编辑器标签页，无需关闭再重开。
-- Fixes editor-tab titles not updating after a session is named: session title changes (including DSH auto-titling) now propagate to open editor tabs without closing and reopening them.
+## 0.3.8
 
-- 修复新会话和设置页的 Agent 预设选择及 Creator 被错误禁用的问题；关闭 Developer Tools 或辅助设置读取失败不再阻断可用功能，仍保留上游能力和设置写入校验。
-- Fixes incorrectly disabled agent choices and Creator actions across new sessions and Settings. Developer Tools preferences and auxiliary settings failures no longer block available actions; upstream capabilities and settings-write checks remain authoritative.
+- 修复空 VS Code 窗口安装编辑器配套时因保存工作区设置失败而立即终止的问题；未打开文件夹时保存到用户设置，安装、关闭与只读控制均可使用。
+- Fixes companion installation and off/read-only controls in empty VS Code windows by saving preferences to user settings when no workspace is open.
 
-- 统一选择器样式并清理旧限宽覆盖；两种布局按字号和可用宽度整体分行，修复缩放后模型、统计和操作按钮错层，保留完整菜单。
-- Unifies selector styling and removes legacy width overrides. Both layouts reflow by font size and available width, fixing staggered model, context and action controls under scaling while preserving complete menus.
+## 0.3.7
+
+- 依赖缺失或损坏时可直接安装／修复 pnpm，验证可运行后重启扩展自有 DSH；准备过程支持取消，配套插件仍由用户明确发起首次安装。
+- Adds cancellable pnpm preparation and repair, verifies the executable and reconnects the managed DSH. First companion installation remains an explicit user action.
+
+- 安装前显示并检测 pnpm 依赖，提供安装命令、官方指南与重新检测；安装按钮根据 DSH 原生记录区分首次安装和修复，不再把安装意愿当成安装成功。迁移时仅清理旧 loader/overlay，保留缓存与会话数据。
+- Checks pnpm before installation and provides setup commands, official guidance and rechecking. Native DSH records distinguish first installation from repair; migration removes only retired loader/overlay files while preserving archives and session data.
+
+- 补齐桌面启动时的 pnpm/fnm 路径，安装失败在设置中保留 DSH 安全错误分类；修正重启可代替安装及强制保存原有未保存内容的旧提示。
+- Restores pnpm/fnm paths for desktop launches and retains native installation failure categories in settings; corrects stale restart and unsaved-buffer descriptions.
+
+- 编辑器配套通过 DSH 标准插件管理器安装、升级和取消，不再注入本地文件 overlay；配套包提供原生中英文标题和描述。安装面板保留进度、取消及未知结果恢复，取消过晚时按 DSH 实际结果显示。
+- Installs, updates and cancels the editor companion through DSH's standard plugin manager instead of a local-file overlay. The package exports native English/Chinese metadata; settings show progress, cancellation and recovery without claiming a late cancellation succeeded.
+
+- 重复排队相同内容时，一个无请求标识的队列项只确认一次发送，重复快照不再提前隐藏其他待发送回执。
+- Keeps identical queued submissions distinct when runtime rows lack request identities, including across repeated snapshots.
+
+- Markdown 代码块随栏宽自动换行，长标识符也可折行；流式与完成后的显示一致，保留缩进和复制原文。
+- Markdown code blocks wrap to the available width, including long identifiers, during streaming and after completion while preserving indentation and copied source text.
+
+- 会话历史补齐与重试提示改为显示在正文上方，修复刚进入会话时正文被挤到右半边、同步完成后才恢复宽度的问题。
+- Stacks history loading and retry notices above messages so opening a session keeps content at full width throughout synchronization.
+
+- 聚焦布局的标准和紧凑视图不再为每次模型请求重复显示首 Token 与生成速度；整轮 Token 用量保留一次，逐请求指标在详细或完整视图中查看。
+- Focused standard and compact views no longer repeat first-token and generation-rate headers for every model request. Completed Turn token totals remain available once; detailed and verbose views retain request metrics.
+
+- 新会话的创建回执已确认预设和模型、且没有额外权限或 Plan 选择时，不再重复配置读取；显式配置、复用会话与失败重试仍先完成配置再发送。
+- Skips redundant configuration reads when a fresh create receipt confirms the preset/model and no additional permission or Plan choice was made. Explicit choices, reused sessions and retries still configure before sending.
+
+- 会话和工作区目录变化只刷新对应目录，不再连带重复读取模型、设置和凭据；全局目录继续由启动、显式刷新和各自的变更事件更新。
+- Session/workspace membership changes refresh their directory without repeating model, settings and credential reads. Startup, explicit refreshes and catalog change events continue to update global directories.
+
+- 任务状态变化只发送一次失效通知，前端复用进行中的读取并核对最新状态；文本、推理和工具进度不再触发任务与会话历史的重复拉取。
+- Task changes invalidate the view once, share in-flight reads, and reconcile the latest state. Streaming text, reasoning and tool progress no longer trigger repeated task and session-history reads.
+
+- 会话内容到达后立即投递，不再等待上一条 IPC 回执；保留有界背压，工具上下文随调用发送，失败后立即有界恢复。发送获确认后立即释放输入框，编辑器配套准备不阻塞发送，停止复用当前连接和工作区下已验证的会话归属。
+- Delivers conversation updates without serial IPC receipt waits, retains bounded backpressure, sends active tool context immediately, and retries failed delivery without a fixed delay. Accepted sends release the composer immediately; optional editor setup and advisory ownership refreshes no longer hold up ordinary sends or verified session stops.
+
+- 自动读取完整会话内容期间明确提示当前显示尚未完整，读取成功后移除提示，无需用户额外操作。
+- Marks content as incomplete while it is read automatically and clears the status once complete, with no additional user action.
+
+- 实时审批与提问缺少答复标识时触发协议恢复，不再显示无法答复的交互；已失效请求与工作区权限拒绝使用不同错误。
+- Recovers malformed live approvals and questions without inventing response identities, and distinguishes expired interactions from workspace access denial.
+
+- 审批保留完整命令行，并自动补齐被传输裁切或移出当前窗口的工具请求；读取完成前仍可拒绝，批准等待完整请求就绪。
+- Preserves complete approval commands and automatically reads clipped or off-window tool requests. Rejection remains available while approval waits for complete request content.
+
+- 编辑器写入回执异常时核对实际缓冲区，保留已应用或结果不明的撤回快照；工具预先声明编辑容量与批次数量上限。
+- Retains undo snapshots for applied or uncertain native edit outcomes and declares edit size and batch limits before execution.
+
+- 编辑器配套修改和撤销不再连带保存用户的未保存内容；应用或路径校验期间新增的缓冲区修改也不会被自动保存，回执明确保留 saved:false。
+- Editor companion edits and reverts preserve unsaved user buffers, including changes made while applying or validating an edit, and report saved:false explicitly.
+
+- 预设失效时明确拒绝发送，不再静默换成其他模式；刷新目录不改写已有会话或草稿的选择，空目录不再补造 standard 预设。
+- Rejects unavailable preset choices without substituting another mode. Catalog refreshes preserve session and draft choices, and empty catalogs no longer invent a standard preset.
+
+- 保留 Windows 负数退出码；退出码为 null 或无法可靠表示时展示原始结果，不再误报为退出成功。
+- Preserves negative Windows exit codes and keeps unknown exit markers in the result instead of reporting a clean exit.
+
+- 首条消息发送前先应用草稿中选择的权限、Plan 和会话配置；配置失败或取消时保留草稿与已创建的会话，不继续投递。
+- Applies staged permission, Plan and session choices before the first message. Configuration failures or cancellation retain the draft and created session without admitting the prompt.
+
+- 修复 Windows 冷启动超过 15 秒即被误判失败的问题；启动和连接请求使用匹配的有界等待，取消仍立即生效。
+- Allows slow Windows cold starts to finish with aligned startup and connection deadlines while retaining immediate cancellation.
+
+- 长提示词的回显被省略且缺少请求标识时，重读全文确认投递，避免已发送内容卡在输入框；右键复制补齐长回复，并防止迟到的读取覆盖较新的复制操作。
+- Confirms delivery of clipped long prompts without request identities by rereading their full content. Context-menu copying retrieves complete replies and ignores reads superseded by a newer copy gesture.
+
+- 工具对象不再误用日志采样限制，完整保留参数、返回字段、换行、数组和深层内容；脱敏后不适合专用卡片的安全正文仍在会话内显示。畸形全量时间线触发自动重读恢复。
+- Separates complete tool content from diagnostic sampling, preserving arguments, result fields, whitespace, arrays and nested data. Keeps safe output readable when redaction prevents a specialized card, and recovers malformed full transcript windows automatically.
+
+- 正文、思考和工具结果在主会话内自动补齐；取消“查看全文”和菜单补取入口，保留会话内折叠，展开即显示全部已收到内容。长数组、工具分组及代码、终端和搜索结果不再因展示限制缺项。发送排队输入期间仍可独立停止当前回复。
+- Automatically completes prose, reasoning and tool results inside the conversation, with inline disclosures and no full-content menu. Removes display limits on arrays, grouped tools, code, terminal and search output. Keeps Stop response available during a pending queued send.
+
+- 修复待建草稿串入已有会话、取消发送后迟到消息仍保留草稿，以及附件读取、移除和超时期间的投递竞态。
+- Keeps new-chat drafts with their intended conversation, clears late accepted drafts after cancellation, and protects attachments across ingestion, removal and send timeouts.
+
+- 控制消息部分投递失败时恢复漏收的聊天面板；恢复会重读连接和交互状态，不因此启动或重连 DSH。
+- Recovers chats that missed control messages, including partial broadcasts across multiple views, by rereading connection and interaction state without starting or reconnecting DSH.
+
+## 0.3.6
+
+- 编辑器配套改为用户主动安装：在设置中选择“安装并启用配套插件”后才加载，F5 同样遵循此选择；安装后继续随扩展更新，后台不再自动安装插件包。
+- Makes the editor companion opt-in through Settings → General → Editor integration. F5 respects the same choice; enabled installations continue to follow extension updates, without background package installation.
+
+- 加载提示词模板列表不再自动创建 `.dsh-vscode/prompts`；仅明确保存工作区模板时创建目录，已有模板保持可读。
+- Stops creating `.dsh-vscode/prompts` while loading template lists. The directory is created only when explicitly saving a workspace template; existing templates remain readable.
+
+## 0.3.5
+
+- 编辑器配套随扩展打包并自动更新；F5 加载当前构建，常规升级自动检测旧配套。Webview 设置提供读写开关、修复、重试和撤销，无需另行安装或逐会话启用。
+- Bundles and automatically updates the editor companion, including every F5 build. Webview settings provide access controls, repair, retry and undo without separate installation or per-session enable commands.
+
+- 修复新会话因工作目录不同或缺少目录信息而无法绑定编辑器工具的问题；工具按当前窗口已信任的文件夹工作。首次调用缺少文件夹或信任时主动提示，设置页提供直接操作入口，工具卡保留具体失败原因。
+- Binds editor tools for new sessions independently of their working directory. Access stays within this window's trusted folders; the first tool request offers folder/trust setup when needed, with direct settings actions and safe failure details.
+
+- 修复从初始页打开会话后“会话 / 轨迹”切换入口缺失的问题；本地视图切换不再依赖 Coding Tools 开关或设置读取成功，迟到的设置回包也不会重置当前视图。
+- Keeps Chat / Trajectory tabs available after opening a session from the initial page, independently of Coding Tools and settings availability; late settings replies preserve the selected view.
+
+- 修复加载较早历史时整页替换、较新消息消失的问题：Host 按消息 ID 向上合并，保留实时更新；恢复触顶加载并按可见消息锚定视口。
+- Prepends older history without replacing newer messages, preserves live updates, restores loading at the top and anchors scrolling to the visible message.
+
+- 空闲发送留在输入框，直到正式消息出现，不再闪入排队面板；发送中的按钮显示可取消的加载圈，支持取消首发和命令请求。精简编辑工具说明，明确分页坐标、自动保存与重试规则。
+- Keeps idle sends in the composer until their durable message appears, with a cancellable loading indicator instead of a transient queue row. Adds request cancellation and concise editor-tool instructions for paging, coordinates, saving and retries.
+
+- 修复编辑已生效却被旧 pending/版本校验拒绝的问题；返回可查询的回执并自动保存文件，saved:false 明确表示已修改但保存失败，不建议重发。区分未知回执、缺失文件、越界和文件访问错误；打开文件支持省略路径，文档读取默认分页并保留准确的 UTF-16 游标。
+- Fixes applied edits being rejected by obsolete pending-only validation. Returns queryable receipts and automatically saves files, reporting applied/saved:false when saving fails. Distinguishes missing receipts/files, invalid ranges and file access errors; supports the active editor for navigation and bounded reads with exact continuation positions.
+
+- 排队正文改为多行编辑，Enter 换行，Ctrl/Cmd+Enter 或失焦保存。条目离队后保留只读正文与附件，直到正式消息进入时间线，避免显示空档；按消息 ID 衔接，不重复发送或生成虚假消息。
+- Adds multiline queued-prompt editing and retains read-only text and attachments during the handoff to the authoritative transcript. Enter inserts a newline; Ctrl/Cmd+Enter or blur saves. Handoff uses message IDs without resending input or inventing transcript rows.
+
+- 修复排队消息因会话状态短暂变化而消失、多条正文默认被折叠的问题；同一连续工作过程共享一个标题和展开状态，不再把每个虚拟列表分片显示成独立过程。
+- Keeps pending queue text visible across transient session status changes and expands queued messages by default. Continuous work shares one disclosure across virtual rows instead of repeating a process header per segment.
+
+- 正常自动连接会校验配套构建指纹，扩展升级后自动切换旧配套；F5 每次构建并启动加载当前配套的专用实例，无需手动安装或修改版本号。显式外部连接保持用户选择，切换失败时保留聊天。
+- Compares companion build fingerprints during automatic connection so extension updates replace stale integration. F5 rebuilds and loads current source in a fresh owned runtime without a package version bump. Explicit external targets remain selected; failed replacement retains chat.
+
+- 编辑器配套随扩展打包，受信工作区默认自动连接；在 Webview「设置 → 常规 → 编辑器集成」中调整读写、自动配置并重试连接，无需另装插件或逐会话运行启用命令。首条工具调用会等待自动绑定，连接完成后恢复共享。
+- Bundles the editor companion for automatic setup in trusted workspaces. Settings → General → Editor integration controls access, automatic setup and recovery; no separate package installation or per-session enable command is required. First tool calls wait for session binding and sharing resumes after connection attachment.
+- 支持多根工作区、未保存文档与选区、诊断、符号、定义、引用、导航和直接编辑。编辑后自动保存整个文件，可使用 VS Code 撤销或撤回 Agent 改动；读写范围与错误恢复均保持有界。命令面板收敛为六个日常入口，其余操作移入界面或上下文菜单。
+- Supports multiple workspace folders, unsaved document and selection reads, diagnostics, language navigation and direct edits. Edits save automatically and support native Undo and independent revert. Keeps six everyday Command Palette entries; management and contextual actions are available from their relevant UI.
+- 按配套协议协商可用能力；旧版、缺少配套或不兼容的 DSH 保留普通聊天和可用能力，设置中提供恢复入口。外部 DSH 不会被自动重启或安装接管。
+- Negotiates optional editor capabilities independently of the DSH version. Missing or incompatible support leaves ordinary chat available with recovery actions in Settings. External DSH processes remain outside automatic installation and restart management.
+
+## 0.3.4
+
+- 修复会话标题不同步、Agent 与 Creator 被错误禁用，以及目标、队列和后台任务恢复后仍提示读取失败的问题。
+- Fixes stale session titles, incorrectly disabled Agent and Creator choices, and read-failure notices that persisted after goals, queues or jobs recovered.
+
+- 优化窄栏单行布局、标题留白和发送图标；当前文件入口常驻，附件按需展开，列表保持单行，高度平滑变化，加载不再反复拉动会话。
+- Refines compact composer layouts, header spacing and send icons. Keeps the current-file shortcut visible, reveals attachments on interaction, and smooths height changes without loading-induced transcript jumps.
+
+- Web UI 默认在 VS Code 内置浏览器打开，可切换系统浏览器；修复登录参数编码导致的认证失败。
+- Opens the Web UI in VS Code's integrated browser by default, with a system-browser option, and fixes login-query encoding that prevented authentication.
 
 ## 0.3.3
 

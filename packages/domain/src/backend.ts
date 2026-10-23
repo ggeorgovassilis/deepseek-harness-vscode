@@ -24,6 +24,7 @@ import type {
   ModelDescriptor,
   ModelDiscoveryInput,
   ModelProvider,
+  PermissionPresetCatalog,
   SessionModelCatalog,
 } from './models.js'
 import type { ConnectedBackend } from './runtime.js'
@@ -44,6 +45,7 @@ import type {
 import type { PermissionOption, QuestionAnswer } from './tools.js'
 import type { UserQuestionRepository } from './user-questions.js'
 import type { WorkspaceCreateInput, WorkspaceSummary } from './workspaces.js'
+import type { EditorBridgeRepository } from './editor-bridge.js'
 
 export interface AsyncEventSource<T> {
   subscribe(listener: (event: T) => void): () => void
@@ -55,6 +57,7 @@ export interface AsyncEventSource<T> {
 export interface SessionRepository {
   /** Runtime-owned permission choices, available before a session exists. */
   listPermissionPresets?(signal?: AbortSignal): Promise<readonly string[]>
+  readPermissionCatalog?(signal?: AbortSignal): Promise<PermissionPresetCatalog>
   /** Whether ordinary prompts accept binary upload receipts. Host-only capability. */
   readonly supportsFileUploads?: boolean
   /** Initialize the backend's default model after a supported account login. */
@@ -316,6 +319,8 @@ export interface ExportRepository {
 }
 
 export interface DshBackend {
+  /** Optional editor companion; activation is a separate explicit Host action. */
+  readonly editorBridge?: EditorBridgeRepository
   readonly inspectorDevtools?: InspectorDevtoolsRepository
   readonly modsBand?: ModsBandRepository
   /** Optional account lifecycle exposed only by the exact RC2 profile. */

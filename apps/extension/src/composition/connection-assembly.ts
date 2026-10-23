@@ -61,6 +61,14 @@ import { hasLocalWorkspaceAuthority } from '../view/session-workspace-scope.js'
 
 const execFileAsync = promisify(execFile)
 const RUNTIME_PATH_STATE_KEY = 'dsh.runtime.lastKnownPath'
+
+/** F5 explicitly requests a fresh owned runtime instead of discovering a stale companion. */
+function usesDevelopmentRuntime(context: Pick<vscode.ExtensionContext, 'extensionMode'>): boolean {
+  return (
+    process.env.DSH_VSCODE_DEV_MANAGED_RUNTIME === '1' &&
+    context.extensionMode === vscode.ExtensionMode.Development
+  )
+}
 export interface RuntimeAssemblyDependencies {
   readonly context: vscode.ExtensionContext
   readonly configuration: VsCodeConfigurationSource
@@ -228,7 +236,7 @@ export function createRuntimeAssembly(deps: RuntimeAssemblyDependencies): Runtim
   const probe = new VersionedBackendProbe(adapters, { fetch: network.fetch })
   const factory = new VersionedBackendFactory(adapters)
   const supervisor = new DshProcessSupervisor({
-    managedPort: () => configuration.read().connection.managedPort,
+    managedPort: () => (usesDevelopmentRuntime(context) ? 0 : configuration.read().connection.managedPort),
     workingDirectory: () => currentWorkspaceFolder()?.uri.fsPath ?? process.cwd(),
     toolMode: () => configuration.read().defaultAgent.toolMode,
     spawn: spawnManagedChild,
@@ -394,19 +402,19 @@ export function createConnectionLifecycle(deps: ConnectionLifecycleDependencies)
   } = deps
   const connect = async (signal?: AbortSignal): Promise<unknown> => {
     const current = configuration.read()
+    const development = usesDevelopmentRuntime(context)
+    const mode = development ? 'new-isolated' : current.connection.mode
     const hasWorkspaceFolder = currentWorkspaceFolders().length > 0
     const useConfiguredEndpoint =
-      current.connection.mode === 'custom' ||
-      ((current.connection.mode === 'auto' || current.connection.mode === 'attach-only') &&
+      mode === 'custom' ||
+      ((mode === 'auto' || mode === 'attach-only') &&
         current.connection.serverUrl !== undefined &&
         current.connection.serverUrl.trim() !== '')
     const customEndpoint = useConfiguredEndpoint
       ? endpointFromServerUrl(current.connection.serverUrl)
       : undefined
     const allowedEndpoints =
-      !useConfiguredEndpoint &&
-      current.connection.mode !== 'new-isolated' &&
-      current.connection.attachPortsConfigured === true
+      !useConfiguredEndpoint && mode !== 'new-isolated' && current.connection.attachPortsConfigured === true
         ? current.connection.attachPorts.map((port) => ({
             host: '127.0.0.1' as const,
             port,
@@ -414,7 +422,7 @@ export function createConnectionLifecycle(deps: ConnectionLifecycleDependencies)
           }))
         : undefined
     const request: ConnectionRequest = {
-      mode: useConfiguredEndpoint ? 'custom' : current.connection.mode,
+      mode: useConfiguredEndpoint ? 'custom' : mode,
       ...(useConfiguredEndpoint ? { credentialRevision: externalConnection?.revision ?? 0 } : {}),
       ...(customEndpoint === undefined ? {} : { endpoint: customEndpoint }),
       ...(allowedEndpoints === undefined ? {} : { allowedEndpoints }),
@@ -424,7 +432,8 @@ export function createConnectionLifecycle(deps: ConnectionLifecycleDependencies)
       // A workspace that has not been trusted may attach to an existing
       // host. An empty window is safe to isolate in a temporary workspace,
       // but an untrusted project folder must never auto-start DSH.
-      autoStart: current.runtime.autoStart && (vscode.workspace.isTrusted || !hasWorkspaceFolder),
+      autoStart:
+        (development || current.runtime.autoStart) && (vscode.workspace.isTrusted || !hasWorkspaceFolder),
     }
     const result = await coordinator.connect(request, signal)
     signal?.throwIfAborted()

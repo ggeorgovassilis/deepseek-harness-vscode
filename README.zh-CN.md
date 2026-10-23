@@ -21,6 +21,8 @@
 
 高级能力取决于连接的 DSH 版本；不支持的操作会明确显示不可用。[兼容契约](docs/dsh-contract.md)列出精确 Adapter 边界；[能力矩阵](docs/capability-matrix.md)概述具体功能、限制和完成状态。
 
+可选的[编辑器集成](packages/dsh-editor-bridge/README.md)仅在你选择 **设置 → 常规 → 编辑器集成 → 安装并启用配套插件** 后加载。启用后自动跟随当前会话及扩展更新，F5 同样遵循安装选择。支持未保存文本、选区、诊断、语言服务、导航和可撤销编辑。设置中可查看状态、持久关闭、切换只读、重试、修复、重启或撤销。能力独立协商；不安装插件也可聊天和手动添加上下文。
+
 ## 安装与开始使用
 
 从 [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=Direwolf.deepseek-harness-client) 安装扩展，或从[最新 GitHub Release](https://github.com/Jabofish/deepseek-harness-vscode/releases/latest)下载对应平台的 VSIX，再执行 **Extensions: Install from VSIX...**。
@@ -32,6 +34,8 @@
 DeepSeek Harness 的 Chat 视图默认注册在辅助侧边栏（VS Code 默认布局中位于编辑器右侧）。如果你以前移动过视图，VS Code 可能保留已有布局；可在命令面板运行 **DSH: Move View to Secondary Side Bar**，选择 Chat 视图和 **New Secondary Side Bar Entry**，或右键视图标题使用 **Move View**。
 
 打开编辑器聊天标签后，侧边栏仍可使用。通过视图标题栏的**会话**按钮切换或新建会话；原生标题栏在宽度足够时显示完整操作，变窄后逐步将低频操作收进“更多”，优先保留**会话**和**设置**。
+
+标题栏的 **Open Web UI** 默认使用 VS Code 内置浏览器。若要使用系统浏览器，在 VS Code 设置中将 `dsh.webUi.browser` 改为 `external`。
 
 选择 **在编辑器区打开** 或执行 **DSH: Open Chat in Editor Area**（`/moveto:editor`）打开标签，`/moveto:sidebar` 可移回侧边栏。也可拖动已打开的编辑器标签分栏。手动排序时，列表内拖动仍用于调整顺序。
 
