@@ -1,85 +1,119 @@
-/* At the smallest composer widths, low-frequency selectors become icon
- * buttons while the model and context status keep readable text. */
-@container dsh-composer (max-width: 32rem) {
+/* Textual session choices share one sizing contract in both conversation layouts.
+ * Menus remain free to escape the rail; labels own their ellipsis. */
+.dsh-app .dsh-unified-composer .dsh-composer__toolbar-controls > .dsh-session-controls {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  flex-wrap: nowrap;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  gap: var(--dsh-space-1);
+}
+
+.dsh-unified-composer .dsh-composer__toolbar-controls .dsh-session-controls__selectors {
+  display: flex;
+  flex: 1 1 8rem;
+  align-items: center;
+  flex-wrap: nowrap;
+  min-width: 0;
+  max-width: 100%;
+  gap: var(--dsh-space-1);
+}
+
+.dsh-unified-composer .dsh-composer__toolbar-controls .dsh-session-controls__mode {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 0;
+  max-width: min(10rem, 45%);
+}
+
+.dsh-unified-composer .dsh-composer__toolbar-controls .dsh-select-menu__trigger {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.dsh-unified-composer .dsh-composer__toolbar-start > .dsh-session-controls,
+.dsh-unified-composer .dsh-composer__toolbar-start .dsh-session-controls__selectors,
+.dsh-unified-composer .dsh-session-controls--permission .dsh-session-controls__access-picker {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.dsh-unified-composer .dsh-session-controls--permission .dsh-select-menu__trigger {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Tighten controls before adding a row. Normal sidebar widths should not pay
+ * for the wide layout's spacing, hints and selector padding. */
+@container dsh-composer (max-width: 52em) {
+  .dsh-app .dsh-unified-composer .dsh-composer__toolbar:has(.dsh-session-controls),
+  .dsh-app .dsh-unified-composer .dsh-composer__toolbar .dsh-composer__toolbar-start,
+  .dsh-app .dsh-unified-composer .dsh-composer__toolbar .dsh-session-controls,
+  .dsh-app
+    .dsh-unified-composer
+    .dsh-composer__toolbar
+    .dsh-session-controls
+    .dsh-session-controls__selectors {
+    gap: var(--dsh-space-1);
+  }
+
+  .dsh-app .dsh-unified-composer .dsh-composer__toolbar-start {
+    max-width: 45cqi;
+  }
+
+  .dsh-app
+    .dsh-unified-composer
+    .dsh-composer__toolbar-controls
+    .dsh-session-controls__selectors
+    > .dsh-model-picker:only-child {
+    flex: 0 1 auto;
+  }
+
+  .dsh-app .dsh-unified-composer .dsh-composer__toolbar .dsh-select-menu__trigger {
+    gap: var(--dsh-space-1);
+    padding-inline: var(--dsh-space-1);
+  }
+
+  .dsh-app .dsh-unified-composer .dsh-session-controls__metrics {
+    flex: 0 0 auto;
+  }
+
+  .dsh-app
+    .dsh-unified-composer
+    .dsh-composer__toolbar-controls
+    .dsh-session-controls__selectors
+    > :is(.dsh-session-controls__mode, .dsh-model-picker) {
+    flex: 1 1 8rem;
+    width: auto;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .dsh-app
+    .dsh-unified-composer
+    .dsh-composer__toolbar-controls
+    .dsh-session-controls__selectors
+    :is(.dsh-session-controls__mode, .dsh-model-picker)
+    .dsh-select-menu__trigger
+    > svg:not(.dsh-select-menu__chevron) {
+    display: none;
+  }
+
   .dsh-unified-composer .dsh-composer__send-label {
     display: none;
   }
 
-  .dsh-unified-composer .dsh-session-controls--primary .dsh-session-controls__selectors {
-    justify-content: flex-end;
-  }
-
-  .dsh-unified-composer
-    .dsh-session-controls--primary
-    .dsh-session-controls__selectors
-    > .dsh-select-menu:not(.dsh-model-picker) {
-    width: 2rem;
-    min-width: 2rem;
-    max-width: 2rem;
-    flex-basis: 2rem;
-  }
-
-  .dsh-unified-composer
-    .dsh-session-controls--primary
-    .dsh-session-controls__selectors
-    > .dsh-select-menu:not(.dsh-model-picker)
-    .dsh-select-menu__trigger {
-    width: 2rem;
-    min-width: 2rem;
-    max-width: 2rem;
-    justify-content: center;
-    padding-inline: var(--dsh-space-1);
-  }
-
-  .dsh-unified-composer
-    .dsh-session-controls--primary
-    .dsh-session-controls__selectors
-    > .dsh-select-menu:not(.dsh-model-picker)
-    .dsh-select-menu__trigger-text,
-  .dsh-unified-composer
-    .dsh-composer__toolbar-controls
-    .dsh-session-controls__selectors
-    > .dsh-select-menu:not(.dsh-model-picker)
-    .dsh-select-menu__trigger-label {
-    display: none;
-  }
-
-  .dsh-unified-composer .dsh-session-controls--primary .dsh-model-picker {
-    flex: 0 1 auto;
-    width: fit-content;
-    min-width: 0;
-    max-width: min(22rem, 100%);
-    flex-basis: auto;
-  }
-
-  .dsh-unified-composer .dsh-session-controls--primary .dsh-model-picker .dsh-select-menu__trigger {
-    width: 100%;
-    min-width: 0;
-    max-width: 100%;
-    justify-content: flex-start;
-    padding-inline: var(--dsh-space-2);
-  }
-
-  .dsh-unified-composer .dsh-session-controls--primary .dsh-model-picker .dsh-select-menu__trigger-label {
-    display: inline;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .dsh-unified-composer
-    .dsh-session-controls--primary
-    .dsh-session-controls__selectors
-    > .dsh-select-menu:not(.dsh-model-picker)
-    .dsh-select-menu__chevron {
+  .dsh-unified-composer .dsh-composer__hint:not(.dsh-sr-only) {
     display: none;
   }
 
   .dsh-unified-composer .dsh-session-controls--primary .dsh-session-controls__metrics {
-    display: flex;
-    flex: 0 0 auto;
-    margin-inline-start: auto;
+    margin-inline-start: 0;
   }
 
   .dsh-unified-composer .dsh-session-controls--primary .dsh-context-meter__label--full {
@@ -89,6 +123,67 @@
   .dsh-unified-composer .dsh-session-controls--primary .dsh-context-meter__label--compact {
     display: inline;
     max-width: 7.5rem;
+  }
+}
+
+/* The ring remains a labelled button opening the full token breakdown. At
+ * compact widths it saves the space needed to keep the model readable. */
+@container dsh-composer (max-width: 30em) {
+  .dsh-app .dsh-unified-composer .dsh-context-meter__label {
+    display: none;
+  }
+}
+
+/* Two choices need a little more room than an existing session's model. Only
+ * allow inner wrapping after the entire choices rail has its own row. */
+@container dsh-composer (max-width: 22em) or (max-width: 20rem) {
+  .dsh-app .dsh-unified-composer .dsh-composer__toolbar:has(.dsh-session-controls__mode) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'controls controls' 'start submit';
+    row-gap: var(--dsh-space-1);
+  }
+
+  .dsh-app
+    .dsh-unified-composer
+    .dsh-composer__toolbar:has(.dsh-session-controls__mode)
+    .dsh-composer__toolbar-start {
+    max-width: none;
+  }
+
+  .dsh-app
+    .dsh-unified-composer
+    .dsh-composer__toolbar:has(.dsh-session-controls__mode)
+    .dsh-session-controls__selectors {
+    flex-wrap: wrap;
+  }
+}
+
+@container dsh-composer (max-width: 18em) or (max-width: 16rem) {
+  .dsh-app .dsh-unified-composer .dsh-composer__toolbar:has(.dsh-session-controls) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'controls controls' 'start submit';
+    gap: var(--dsh-space-1);
+  }
+
+  .dsh-app .dsh-unified-composer .dsh-composer__toolbar-controls > .dsh-session-controls,
+  .dsh-app
+    .dsh-unified-composer
+    .dsh-composer__toolbar-controls
+    .dsh-session-controls
+    .dsh-session-controls__selectors {
+    flex-wrap: wrap;
+  }
+
+  .dsh-app .dsh-unified-composer .dsh-composer__toolbar .dsh-composer__toolbar-start {
+    gap: var(--dsh-space-1);
+    max-width: none;
+  }
+
+  .dsh-unified-composer
+    .dsh-session-controls--permission
+    .dsh-select-menu__trigger
+    > svg:not(.dsh-select-menu__chevron) {
+    display: none;
   }
 }
 
@@ -783,10 +878,6 @@
 @media (max-width: 18rem) {
   .dsh-conversation__topbar {
     --dsh-control-height: 24px;
-  }
-
-  .dsh-app[data-conversation-layout='focused'] .dsh-conversation__topbar {
-    padding-inline: var(--dsh-space-1);
   }
 
   .dsh-conversation__views {

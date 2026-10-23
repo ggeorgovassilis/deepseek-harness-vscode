@@ -50,7 +50,6 @@ export function AppView(props: ReturnType<typeof useAppController>): ReactElemen
     branching,
     busyAction,
     codingToolsEnabled,
-    trajectoryVisible,
     compatibilityWarning,
     composerOnCancel,
     composerOnCaptureEditorContext,
@@ -356,12 +355,16 @@ export function AppView(props: ReturnType<typeof useAppController>): ReactElemen
                       store={store}
                       modelScope="global"
                       key={state.pendingSession.revision}
+                      draftKey={`pending:${state.pendingSession.revision}`}
                       disabled={backend.kind !== 'connected'}
                       running={false}
                       attachments={attachments}
                       configuration={state.pendingSession.configuration}
                       configurationDraft
                       permissionPresets={state.newSessionPermissionPresets ?? []}
+                      {...(state.newSessionPermissionDefault === undefined
+                        ? {}
+                        : { defaultPermissionPreset: state.newSessionPermissionDefault })}
                       presets={state.presets}
                       presetMutable
                       {...(newSessionPresetSelectionEnabled === undefined
@@ -404,12 +407,11 @@ export function AppView(props: ReturnType<typeof useAppController>): ReactElemen
                       />
                     ) : (
                       <RuntimeConnectionView
+                        {...(state.connectionOutput === undefined ? {} : { output: state.connectionOutput })}
                         state={backend}
                         loadingSessionCatalog={backend.kind === 'connected'}
                         onRetry={retryConnection}
                         onOpenSettings={() => store.setDrawer('settings')}
-                        onReadDiagnostics={() => store.readDiagnostics()}
-                        onReconnectDiagnostics={() => store.reconnect()}
                         onShowDiagnosticsOutput={() => store.showDiagnostics()}
                       />
                     )}
@@ -426,46 +428,44 @@ export function AppView(props: ReturnType<typeof useAppController>): ReactElemen
                   aria-label={active.title.trim() === '' ? t('app.conversation') : active.title}
                 >
                   <div className="dsh-conversation__topbar">
-                    {trajectoryVisible ? (
-                      <div
-                        className="dsh-conversation__views"
-                        role="tablist"
-                        aria-label={t('app.conversationView')}
+                    <div
+                      className="dsh-conversation__views"
+                      role="tablist"
+                      aria-label={t('app.conversationView')}
+                    >
+                      <button
+                        id={CONVERSATION_VIEW_IDS.chat.tab}
+                        data-conversation-view="chat"
+                        className={`dsh-conversation__view-tab${
+                          conversationView === 'chat' ? ' dsh-conversation__view-tab--active' : ''
+                        }`}
+                        type="button"
+                        role="tab"
+                        aria-selected={conversationView === 'chat'}
+                        aria-controls={CONVERSATION_VIEW_IDS.chat.panel}
+                        tabIndex={conversationView === 'chat' ? 0 : -1}
+                        onKeyDown={onConversationTabKeyDown}
+                        onClick={() => setConversationView('chat')}
                       >
-                        <button
-                          id={CONVERSATION_VIEW_IDS.chat.tab}
-                          data-conversation-view="chat"
-                          className={`dsh-conversation__view-tab${
-                            conversationView === 'chat' ? ' dsh-conversation__view-tab--active' : ''
-                          }`}
-                          type="button"
-                          role="tab"
-                          aria-selected={conversationView === 'chat'}
-                          aria-controls={CONVERSATION_VIEW_IDS.chat.panel}
-                          tabIndex={conversationView === 'chat' ? 0 : -1}
-                          onKeyDown={onConversationTabKeyDown}
-                          onClick={() => setConversationView('chat')}
-                        >
-                          {t('app.chat')}
-                        </button>
-                        <button
-                          id={CONVERSATION_VIEW_IDS.trajectory.tab}
-                          data-conversation-view="trajectory"
-                          className={`dsh-conversation__view-tab${
-                            conversationView === 'trajectory' ? ' dsh-conversation__view-tab--active' : ''
-                          }`}
-                          type="button"
-                          role="tab"
-                          aria-selected={conversationView === 'trajectory'}
-                          aria-controls={CONVERSATION_VIEW_IDS.trajectory.panel}
-                          tabIndex={conversationView === 'trajectory' ? 0 : -1}
-                          onKeyDown={onConversationTabKeyDown}
-                          onClick={() => setConversationView('trajectory')}
-                        >
-                          {t('app.trajectory')}
-                        </button>
-                      </div>
-                    ) : null}
+                        {t('app.chat')}
+                      </button>
+                      <button
+                        id={CONVERSATION_VIEW_IDS.trajectory.tab}
+                        data-conversation-view="trajectory"
+                        className={`dsh-conversation__view-tab${
+                          conversationView === 'trajectory' ? ' dsh-conversation__view-tab--active' : ''
+                        }`}
+                        type="button"
+                        role="tab"
+                        aria-selected={conversationView === 'trajectory'}
+                        aria-controls={CONVERSATION_VIEW_IDS.trajectory.panel}
+                        tabIndex={conversationView === 'trajectory' ? 0 : -1}
+                        onKeyDown={onConversationTabKeyDown}
+                        onClick={() => setConversationView('trajectory')}
+                      >
+                        {t('app.trajectory')}
+                      </button>
+                    </div>
                     <span
                       className="dsh-conversation__header-title"
                       title={active.title.trim() === '' ? t('app.conversation') : active.title}
@@ -515,51 +515,15 @@ export function AppView(props: ReturnType<typeof useAppController>): ReactElemen
                           >
                             {t('inspector.title')}
                           </button>
-                          {state.transcript === undefined ||
-                          state.transcript.omittedNodeIds.length === 0 ? null : (
-                            <details className="dsh-conversation__content-menu">
-                              <summary>{t('transcript.fullContent')}</summary>
-                              <div className="dsh-conversation__content-list">
-                                {state.transcript.omittedNodeIds.map((id) => {
-                                  const node = state.timeline.nodes.find((candidate) => candidate.id === id)
-                                  const label =
-                                    node?.kind === 'tool'
-                                      ? node.tool.title
-                                      : node !== undefined && 'markdown' in node
-                                        ? node.markdown.slice(0, 64)
-                                        : t('transcript.fullContent')
-                                  return (
-                                    <button
-                                      key={id}
-                                      type="button"
-                                      disabled={
-                                        (node?.kind === 'assistant-message' &&
-                                          (node.streaming || node.reasoning?.streaming === true)) ||
-                                        (node?.kind === 'reasoning' && node.streaming) ||
-                                        (node?.kind === 'tool' &&
-                                          (node.tool.status === 'running' || node.tool.status === 'queued'))
-                                      }
-                                      className="dsh-button dsh-button--secondary dsh-button--compact"
-                                      onClick={() => {
-                                        closeMenu()
-                                        void store
-                                          .openTranscriptContent(id)
-                                          .catch((reason) => setError(String(reason)))
-                                      }}
-                                    >
-                                      {label}
-                                    </button>
-                                  )
-                                })}
-                              </div>
-                            </details>
-                          )}
                         </>
                       )}
                     </ConversationActionsMenu>
                   </div>
                   {state.transcript?.historical !== true ? null : (
-                    <div className="dsh-timeline__history-more">
+                    <div
+                      className="dsh-timeline__history-more"
+                      style={{ position: 'absolute', right: '1rem', bottom: '6rem', zIndex: 2 }}
+                    >
                       <button
                         type="button"
                         className="dsh-button dsh-button--secondary dsh-button--compact"
@@ -615,18 +579,14 @@ export function AppView(props: ReturnType<typeof useAppController>): ReactElemen
                       }}
                     />
                   )}
-                  {conversationView === 'chat' || !trajectoryVisible ? (
+                  {conversationView === 'chat' ? (
                     <Timeline
                       sessionId={active.id}
                       {...(inspectorReveal?.sessionKey === `${state.connectionEpoch}:${active.id}`
                         ? { revealTarget: inspectorReveal }
                         : {})}
-                      {...(trajectoryVisible
-                        ? {
-                            panelId: CONVERSATION_VIEW_IDS.chat.panel,
-                            panelLabelledBy: CONVERSATION_VIEW_IDS.chat.tab,
-                          }
-                        : {})}
+                      panelId={CONVERSATION_VIEW_IDS.chat.panel}
+                      panelLabelledBy={CONVERSATION_VIEW_IDS.chat.tab}
                       nodes={state.timeline.nodes}
                       {...(state.timeline.nodeChangeStart === undefined
                         ? {}
@@ -655,14 +615,23 @@ export function AppView(props: ReturnType<typeof useAppController>): ReactElemen
                       hasMoreHistory={state.historyHasMore}
                       loadingOlderHistory={state.historyLoading}
                       onLoadOlderHistory={timelineOnLoadOlderHistory}
-                      pagedHistory
                       onFeedback={timelineOnFeedback}
                       onFeedbackPrepare={timelineOnFeedbackPrepare}
                       onFeedbackSubmit={timelineOnFeedbackSubmit}
+                      {...(state.transcript === undefined
+                        ? {}
+                        : { omittedNodeIds: state.transcript.omittedNodeIds })}
+                      loadFullNode={(nodeId, signal) => store.loadTranscriptNode(nodeId, signal)}
+                      loadFullContent={(nodeId) => store.loadTranscriptContent(nodeId)}
                     />
                   ) : (
                     <TrajectoryView
                       sessionId={active.id}
+                      contentScope={`${state.connectionEpoch}:${state.timeline.sessionId ?? active.id}`}
+                      {...(state.transcript === undefined
+                        ? {}
+                        : { omittedNodeIds: state.transcript.omittedNodeIds })}
+                      loadFullNode={(nodeId, signal) => store.loadTranscriptNode(nodeId, signal)}
                       panelId={CONVERSATION_VIEW_IDS.trajectory.panel}
                       panelLabelledBy={CONVERSATION_VIEW_IDS.trajectory.tab}
                       nodes={state.timeline.nodes}
@@ -676,11 +645,23 @@ export function AppView(props: ReturnType<typeof useAppController>): ReactElemen
                     />
                   )}
                   <QueuePanel
+                    key={state.activeSessionId}
                     items={state.queue}
+                    directEntries={state.directPromptReceipts}
+                    {...(state.pendingPrompts === undefined
+                      ? {}
+                      : {
+                          pendingEntries: state.pendingPrompts.filter(
+                            (prompt) => prompt.sessionId === state.activeSessionId,
+                          ),
+                        })}
+                    transcript={state.transcript}
+                    connected={backend.kind === 'connected'}
                     running={activeRunning}
                     onEdit={queueOnEdit}
                     onRemove={queueOnRemove}
                     onModeChange={queueOnModeChange}
+                    onDismissPending={(id) => store.dismissPendingPrompt(id)}
                     onLoadImage={timelineOnLoadImage}
                   />
                   {pendingPermissions.length > 0 || pendingQuestions.length > 0 ? (
@@ -705,11 +686,13 @@ export function AppView(props: ReturnType<typeof useAppController>): ReactElemen
                           {t('composer.stop')}
                         </button>
                       )}
-                      {pendingPermissions.map(({ request, command }) => (
+                      {pendingPermissions.map(({ request, command, contentPending, contentFailed }) => (
                         <ApprovalCard
                           key={request.id}
                           request={request}
                           disabled={respondingInteractionId !== undefined}
+                          contentPending={contentPending}
+                          contentFailed={contentFailed}
                           {...(command === undefined ? {} : { command })}
                           onRespond={approvalRespondFor(request)}
                         />
@@ -742,6 +725,8 @@ export function AppView(props: ReturnType<typeof useAppController>): ReactElemen
                     {subagentReadOnlyReason === undefined || activeRunning ? (
                       <>
                         <ConnectedComposer
+                          key={active.id}
+                          draftKey={active.id}
                           store={store}
                           modelScope="session"
                           disabled={backend.kind !== 'connected'}

@@ -1,4 +1,5 @@
 import type { MovetoOutcome } from '../client-commands.js'
+import type { PendingPromptReceipt } from './pending-prompts.js'
 import type {
   FeatureHostEvent,
   FeatureRequest,
@@ -20,6 +21,8 @@ import type {
   CheckpointConflictPolicy,
   CheckpointPreview,
   CheckpointSummary,
+  ConnectionPhase,
+  ConnectionLogEntry,
   CustomProviderCreateResult,
   CustomProviderDraft,
   DshSettingsSchema,
@@ -67,7 +70,7 @@ import type {
   UserQuestion,
   WorkspaceSummary,
 } from '@dsh-vscode/domain'
-import type { TimelineState } from '@dsh-vscode/timeline'
+import type { TimelineState, TimelineNode } from '@dsh-vscode/timeline'
 import type { JobFollowState } from './job-follow.js'
 import type { PluginInstallInput, PluginInstallRecoveryState } from '../plugin-install-recovery.js'
 import type { SessionModelDirectoryState } from './model-directory-state.js'
@@ -115,8 +118,8 @@ export interface IngestedFile {
 export type WebviewBackendState =
   | { readonly kind: 'idle' }
   | { readonly kind: 'locating-runtime' }
-  | { readonly kind: 'discovering' }
-  | { readonly kind: 'connecting' }
+  | { readonly kind: 'discovering'; readonly phase?: ConnectionPhase }
+  | { readonly kind: 'connecting'; readonly phase?: ConnectionPhase }
   | { readonly kind: 'connected' }
   | { readonly kind: 'starting' }
   | { readonly kind: 'runtime-missing'; readonly searchedLocations: readonly string[] }
@@ -142,7 +145,14 @@ export interface SurfaceAssignment {
 }
 
 export interface AppState extends SessionModelDirectoryState {
+  /** Recent direct sends, correlated with DSH inbox rows by request identity. */
+  readonly directPromptRequestIds?: readonly string[]
+  /** Direct sends stay in the composer until confirmed, including while DSH briefly projects an inbox row. */
+  readonly directPromptReceipts?: readonly PendingPromptReceipt[]
+  /** Queue-mode prompts accepted by the Host but not yet projected by DSH. */
+  readonly pendingPrompts?: readonly PendingPromptReceipt[]
   readonly backend: WebviewBackendState
+  readonly connectionOutput?: readonly ConnectionLogEntry[]
   /** Monotonic opaque counter for a newly observed connected backend epoch. */
   readonly connectionEpoch?: number
   /** Safe connected-host version copied from the Extension Host snapshot. */
@@ -190,6 +200,7 @@ export interface AppState extends SessionModelDirectoryState {
   readonly presetSelectionEnabled?: boolean | undefined
   readonly permissionPresets: readonly string[]
   readonly newSessionPermissionPresets?: readonly string[]
+  readonly newSessionPermissionDefault?: string | undefined
   readonly commands: readonly DynamicCommand[]
   readonly pluginInventoryRevision: number
   readonly pluginInstallProgress: PluginInstallProgressView | undefined
@@ -278,6 +289,11 @@ export interface AppActions {
   loadOlderHistory(): Promise<void>
   navigateTranscript(direction: 'newer' | 'latest'): Promise<void>
   openTranscriptContent(nodeId: string): Promise<void>
+  loadTranscriptContent(nodeId: string): Promise<string>
+  loadTranscriptNode(nodeId: string, signal?: AbortSignal): Promise<TimelineNode>
+  dismissPendingPrompt(id: string): void
+  forgetDirectPromptRequests(ids: readonly string[]): void
+  refreshQueue(sessionId: string): Promise<readonly QueuedInput[] | undefined>
   openSubagent(entry: SubagentView, parentAvailable: boolean): Promise<void>
   renameSession(sessionId: string, title: string): Promise<void>
   renameWorkspace(workspaceId: string, name: string): Promise<void>
@@ -286,13 +302,14 @@ export interface AppActions {
   moveWorkspace(workspaceId: string, beforeWorkspaceId?: string): Promise<void>
   moveSession(workspaceId: string, sessionId: string, beforeSessionId?: string): Promise<void>
   forkSession(sessionId: string, atSeq?: number): Promise<void>
-  createSession(workspaceId?: string, presetId?: string): Promise<void>
+  createSession(workspaceId?: string, presetId?: string): Promise<string | undefined>
   stageSession(workspaceId?: string, presetId?: string): Promise<void>
   configurePendingSession(configuration: AgentConfiguration): void
   sendPendingPrompt(
     text: string,
     attachments: readonly PromptAttachment[],
     mode: RunningInputMode,
+    signal?: AbortSignal,
   ): Promise<void>
   removeSession(sessionId: string): Promise<void>
   /** Archived rows the host still holds, fetched with `session.list(archived: true)`. */
@@ -305,12 +322,14 @@ export interface AppActions {
     sessionId: string,
     command: string,
     attachments?: readonly PromptAttachment[],
+    signal?: AbortSignal,
   ): Promise<boolean>
   sendPrompt(
     sessionId: string,
     text: string,
     attachments: readonly PromptAttachment[],
     mode: RunningInputMode,
+    signal?: AbortSignal,
   ): Promise<void>
   cancelSession(sessionId: string): Promise<void>
   followJob(jobId: string): Promise<void>

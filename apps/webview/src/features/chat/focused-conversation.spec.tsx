@@ -75,6 +75,102 @@ afterEach(() => {
 })
 
 describe('focused conversation interactions', () => {
+  it.each(['standard', 'compact'] as const)(
+    'keeps one completed Turn usage disclosure without per-request metric rows in %s view',
+    (mode) => {
+      const source = nodes.map((node): TimelineNode =>
+        node.kind !== 'assistant-message'
+          ? node
+          : {
+              ...node,
+              modelLabel: 'fixture-model',
+              timing: { stepStartTime: 1_000, firstTokenTime: 1_500, completedTime: 2_500 },
+              usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+              ...(node.id === 'answer'
+                ? { turnUsage: { inputTokens: 20, outputTokens: 40, totalTokens: 60 } }
+                : {}),
+            },
+      )
+      const view = render(session(mode, source))
+      fireEvent.click(screen.getByRole('button', { name: /Work completed/u }))
+      expect(screen.getByText('I am examining the implementation')).toBeDefined()
+      expect(screen.getByText('The complete result')).toBeDefined()
+      expect(view.container.querySelectorAll('.dsh-timeline__assistant-metrics')).toHaveLength(0)
+      expect(screen.getAllByText('Token usage')).toHaveLength(1)
+      fireEvent.click(screen.getByText('Token usage'))
+      expect(screen.getByText('60')).toBeDefined()
+      expect(screen.getByText('40')).toBeDefined()
+
+      view.rerender(session('detailed', source))
+      expect(view.container.querySelectorAll('.dsh-timeline__assistant-metrics')).toHaveLength(2)
+      expect(screen.getAllByText('Token usage')).toHaveLength(1)
+    },
+  )
+
+  it('does not insert request metrics while a multi-step Turn is active and preserves interruption notices', () => {
+    const source = nodes.map((node): TimelineNode =>
+      node.kind !== 'assistant-message'
+        ? node
+        : {
+            ...node,
+            turnCompleted: false,
+            timing: { stepStartTime: 1_000, firstTokenTime: 1_500, completedTime: 2_500 },
+            usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+          },
+    )
+    const view = render(session('standard', source))
+    expect(screen.getByText('I am examining the implementation')).toBeDefined()
+    expect(screen.getByText('The complete result')).toBeDefined()
+    expect(view.container.querySelectorAll('.dsh-timeline__assistant-metrics')).toHaveLength(0)
+    expect(screen.queryByText('Token usage')).toBeNull()
+    view.rerender(
+      session(
+        'standard',
+        source.map((node) =>
+          node.kind === 'assistant-message' ? { ...node, interrupted: true as const } : node,
+        ),
+      ),
+    )
+    expect(screen.getAllByText('Interrupted')).not.toHaveLength(0)
+    expect(view.container.querySelectorAll('.dsh-timeline__assistant-metrics')).toHaveLength(0)
+  })
+
+  it('presents one disclosure across virtual segments and toggles the entire continuous process', () => {
+    const source: TimelineNode[] = Array.from({ length: 55 }, (_, index) => ({
+      kind: 'assistant-message',
+      id: `continuous-${index}`,
+      markdown: `Progress item ${index}`,
+      streaming: false,
+      turn: 1,
+      step: index + 1,
+      turnCompleted: false,
+    }))
+    const view = render(session('standard', source))
+    expect(screen.getAllByRole('button', { name: /Work details/u })).toHaveLength(1)
+    expect(screen.getByText('Progress item 54')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /Work details/u }))
+    expect(screen.queryByText('Progress item 0')).toBeNull()
+    expect(screen.queryByText('Progress item 54')).toBeNull()
+    view.rerender(
+      session('standard', [
+        ...source,
+        {
+          kind: 'assistant-message',
+          id: 'continuous-answer',
+          markdown: 'Final continuous answer',
+          streaming: false,
+          turn: 1,
+          step: 56,
+          turnCompleted: true,
+        },
+      ]),
+    )
+    expect(screen.getAllByRole('button', { name: /Work completed/u })).toHaveLength(1)
+    expect(screen.getByText('Final continuous answer')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /Work completed/u }))
+    expect(screen.getByText('Progress item 0')).toBeTruthy()
+    expect(screen.getByText('Progress item 54')).toBeTruthy()
+  })
   it('lets a user close active work, retains that choice on updates, and reopens the same process', () => {
     const live = nodes
       .slice(0, -1)
@@ -294,7 +390,7 @@ describe('focused conversation interactions', () => {
     expect(screen.queryByText('Tool calls: 1')).toBeNull()
   })
 
-  it('limits mounted details to one tool page and makes every call reachable', () => {
+  it('keeps every tool call in the main conversation group without manual pages', () => {
     const tools = Array.from({ length: 55 }, (_, index) => ({
       kind: 'tool' as const,
       id: `tool-${index}`,
@@ -318,11 +414,8 @@ describe('focused conversation interactions', () => {
     )
     expect(view.container.querySelectorAll('[data-tool-call-id]').length).toBe(0)
     fireEvent.click(screen.getByRole('button', { name: /timeline.focused.tools/ }))
-    expect(view.container.querySelectorAll('[data-tool-call-id]').length).toBe(20)
-    fireEvent.click(screen.getByRole('button', { name: 'timeline.focused.next' }))
-    expect(view.container.querySelector('[data-tool-call-id="tool-20"]')).not.toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'timeline.focused.next' }))
-    expect(view.container.querySelectorAll('[data-tool-call-id]').length).toBe(15)
+    expect(view.container.querySelectorAll('[data-tool-call-id]').length).toBe(55)
     expect(view.container.querySelector('[data-tool-call-id="tool-54"]')).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'timeline.focused.next' })).toBeNull()
   })
 })

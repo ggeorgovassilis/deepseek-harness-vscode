@@ -1,4 +1,5 @@
 import type { EditorContextItem, PromptTemplateScope, TaskListScope } from '@dsh-vscode/domain'
+import { AppError } from '@dsh-vscode/domain'
 import type { FeatureHostEvent } from '@dsh-vscode/webview-protocol'
 import { translate } from '../../i18n.js'
 import type { ProtocolClient } from '../protocol-client.js'
@@ -82,8 +83,10 @@ export function createFeatureActions(host: FeatureActionHost): FeatureActions {
   const sessionWorkspaceFolderId = host.sessionWorkspaceFolderId
 
   let editorContextRefreshGeneration = 0
+  let editorContextRelease: Promise<void> | undefined
   let changesRefreshGeneration = 0
   let tasksRefreshGeneration = 0
+  let taskRefresh: { key: string; dirty: boolean; promise: Promise<void> } | undefined
   let checkpointsRefreshGeneration = 0
   let promptTemplatesRefreshGeneration = 0
 
@@ -92,6 +95,12 @@ export function createFeatureActions(host: FeatureActionHost): FeatureActions {
     const generation = ++editorContextRefreshGeneration
     setState((current) => ({ ...current, editorContextLoading: true }))
     try {
+      // Only the context strip waits for discarded handles to be reclaimed.
+      // The next conversation can already paint, accept input and be stopped.
+      if (editorContextRelease !== undefined) {
+        await editorContextRelease
+        if (generation !== editorContextRefreshGeneration) return
+      }
       const result = object(
         await client.featureRequest({
           type: 'editor.context.list',
@@ -163,14 +172,16 @@ export function createFeatureActions(host: FeatureActionHost): FeatureActions {
         setState((current) => ({ ...current, changesLoading: false }))
     }
   }
-  const refreshTasksState = async (
+  const readTasksState = async (
     sessionId: string | undefined = readState().activeSessionId,
     includeCompleted = false,
     scope: TaskListScope = 'current-session',
   ): Promise<void> => {
     const targetSessionId = scope === 'workspace' ? undefined : sessionId
     const expectedActiveSessionId = readState().activeSessionId
-    const workspaceFolderId = sessionId === undefined ? undefined : sessionWorkspaceFolderId(sessionId)
+    const folderSessionId = sessionId ?? expectedActiveSessionId
+    const workspaceFolderId =
+      folderSessionId === undefined ? undefined : sessionWorkspaceFolderId(folderSessionId)
     if (
       typeof client.featureRequest !== 'function' ||
       (scope === 'current-session' && targetSessionId === undefined) ||
@@ -209,6 +220,55 @@ export function createFeatureActions(host: FeatureActionHost): FeatureActions {
     } finally {
       if (generation === tasksRefreshGeneration) setState((current) => ({ ...current, tasksLoading: false }))
     }
+  }
+  const refreshTasksState = (
+    sessionId: string | undefined = readState().activeSessionId,
+    includeCompleted = false,
+    scope: TaskListScope = 'current-session',
+  ): Promise<void> => {
+    const activeSessionId = readState().activeSessionId
+    const folderSessionId = sessionId ?? activeSessionId
+    const key = JSON.stringify([
+      sessionId,
+      includeCompleted,
+      scope,
+      activeSessionId,
+      folderSessionId === undefined ? undefined : sessionWorkspaceFolderId(folderSessionId),
+    ])
+    if (taskRefresh?.key === key) {
+      taskRefresh.dirty = true
+      return taskRefresh.promise
+    }
+    let resolve!: () => void
+    let reject!: (reason: unknown) => void
+    const promise = new Promise<void>((fulfilled, failed) => {
+      resolve = fulfilled
+      reject = failed
+    })
+    const pending = { key, dirty: false, promise }
+    taskRefresh = pending
+    const run = async (): Promise<void> => {
+      do {
+        pending.dirty = false
+        await readTasksState(sessionId, includeCompleted, scope)
+      } while (taskRefresh === pending && pending.dirty && readState().activeSessionId === activeSessionId)
+    }
+    // Start immediately. Invalidations received during this read need only
+    // one fresh read after it, never a queue of duplicate repository pulls.
+    const finish = (): void => {
+      if (taskRefresh === pending) taskRefresh = undefined
+    }
+    void run().then(
+      () => {
+        finish()
+        resolve()
+      },
+      (reason: unknown) => {
+        finish()
+        reject(reason)
+      },
+    )
+    return promise
   }
   const refreshCheckpointsState = async (
     sessionId: string | undefined = readState().activeSessionId,
@@ -299,7 +359,7 @@ export function createFeatureActions(host: FeatureActionHost): FeatureActions {
       group.push(contextRef)
       grouped.set(item.ref.workspaceFolderId, group)
     }
-    await Promise.all(
+    const results = await Promise.allSettled(
       [...grouped].map(([workspaceFolderId, contextRefs]) =>
         client.featureRequest({
           type: 'editor.context.release',
@@ -308,9 +368,12 @@ export function createFeatureActions(host: FeatureActionHost): FeatureActions {
         }),
       ),
     )
+    const failed = results.find((result) => result.status === 'rejected')
+    if (failed?.status === 'rejected') throw failed.reason
   }
   const discardEditorContextForSessionSwitch = async (nextSessionId: string): Promise<void> => {
     if (readState().activeSessionId === undefined || readState().activeSessionId === nextSessionId) return
+    editorContextRefreshGeneration += 1
     const refs = readState().editorContext.map((item) => item.ref.contextRef)
     if (refs.length === 0) return
     const items = [...readState().editorContext]
@@ -324,11 +387,15 @@ export function createFeatureActions(host: FeatureActionHost): FeatureActions {
       editorContextAvailableKinds: [],
       editorContextLoading: false,
     }))
-    try {
-      await releaseEditorContextRefs(refs, items)
-    } catch {
-      // Expired or already-released handles are harmless during a view switch.
-    }
+    // Wait for all old cleanups before another context read/capture can reuse
+    // the Host's draft handles. Expired handles do not block navigation.
+    const release = Promise.all([editorContextRelease, releaseEditorContextRefs(refs, items)]).then(
+      () => undefined,
+      () => undefined,
+    )
+    editorContextRelease = release
+    await release
+    if (editorContextRelease === release) editorContextRelease = undefined
   }
   const discardEditorContextForWorkspaceChange = async (): Promise<void> => {
     editorContextRefreshGeneration += 1
@@ -358,6 +425,19 @@ export function createFeatureActions(host: FeatureActionHost): FeatureActions {
   const methods: FeatureActionMethods = {
     captureEditorContext: async (kind, workspaceFolderId) => {
       if (typeof client.featureRequest !== 'function') throw new Error(translate('app.error.dshMode'))
+      if (editorContextRelease !== undefined) {
+        const { activeSessionId, pendingSession } = readState()
+        await editorContextRelease
+        if (
+          activeSessionId !== readState().activeSessionId ||
+          pendingSession?.revision !== readState().pendingSession?.revision
+        )
+          throw new AppError({
+            code: 'REQUEST_CANCELLED',
+            message: 'The conversation changed before the editor context could be captured.',
+            retryable: true,
+          })
+      }
       const result = object(
         await client.featureRequest<unknown>({
           type: 'editor.context.capture',
@@ -720,11 +800,13 @@ export function createFeatureActions(host: FeatureActionHost): FeatureActions {
       return true
     }
     if (
-      message.name === 'tasks.updated' &&
-      (readState().taskScope === 'workspace' || message.task.sessionId === readState().activeSessionId)
+      (message.name === 'tasks.updated' || message.name === 'tasks.invalidated') &&
+      (readState().taskScope === 'workspace' ||
+        (message.name === 'tasks.updated' ? message.task.sessionId : message.sessionId) ===
+          readState().activeSessionId)
     ) {
       const taskScope = readState().taskScope
-      void refreshTasksState(taskScope === 'workspace' ? undefined : message.task.sessionId, false, taskScope)
+      void refreshTasksState(readState().activeSessionId, false, taskScope).catch(() => undefined)
       return true
     }
     if (
@@ -755,6 +837,7 @@ export function createFeatureActions(host: FeatureActionHost): FeatureActions {
       editorContextRefreshGeneration += 1
       changesRefreshGeneration += 1
       tasksRefreshGeneration += 1
+      taskRefresh = undefined
       checkpointsRefreshGeneration += 1
       promptTemplatesRefreshGeneration += 1
     },

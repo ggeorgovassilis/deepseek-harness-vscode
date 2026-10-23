@@ -86,6 +86,7 @@ export type {
  * compatibility projection consumed by the existing repositories.
  */
 export class AlphaLoopbackApiClient implements DshTransport {
+  public readonly promptRequestIdentity = true
   private readonly cordisBoundary = new CordisClientBoundary()
   private readonly closed = new AbortController()
   private readonly remoteMux: AlphaRemoteMux
@@ -562,7 +563,12 @@ export class AlphaLoopbackApiClient implements DshTransport {
     const cookie = this.options.authCookie?.(this.options.endpoint)
     const headers: Record<string, string> = { 'content-type': 'application/json' }
     if (cookie !== undefined && cookie.trim() !== '') headers.Cookie = cookie
-    const requestSignal = combineSignals(signal, this.closed.signal, this.options.requestTimeoutMs)
+    // Package-manager operations can outlive an ordinary RPC. Keep their original
+    // response alive: DSH does not retain completed installation results for replay.
+    const timeoutMs = /^pluginManager\/(?:installBundle|waitForInstall|removeBundle)$/u.test(endpoint)
+      ? Math.max(this.options.requestTimeoutMs, 600_000)
+      : this.options.requestTimeoutMs
+    const requestSignal = combineSignals(signal, this.closed.signal, timeoutMs)
     let response: Response
     try {
       response = await this.options.fetch(target, {

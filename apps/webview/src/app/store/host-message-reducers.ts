@@ -4,12 +4,19 @@ import type {
   SessionConfigurationPatch,
   SessionSummary,
 } from '@dsh-vscode/domain'
-import { transcriptPatchSchema, type HostMessage, type TranscriptPatch } from '@dsh-vscode/webview-protocol'
+import { CONNECTION_PHASES } from '@dsh-vscode/domain'
+import {
+  connectionOutputSchema,
+  transcriptPatchSchema,
+  type HostMessage,
+  type TranscriptPatch,
+} from '@dsh-vscode/webview-protocol'
 import { translate } from '../../i18n.js'
 import { parseHostDomainEvent, isSurfaceEventName } from './event-parser.js'
 import { parseDshUpdateProgress } from './host-settings.js'
 import { EMPTY_SUBAGENT_CATALOG } from './initial-state.js'
 import { reduceJobFollow } from './job-follow.js'
+import { confirmPendingPrompts } from './pending-prompts.js'
 import {
   removeMatching,
   sameGoalList,
@@ -31,6 +38,7 @@ import {
 import type { AppState, StateSetter } from './types.js'
 import { object } from './unknown-record.js'
 import { currentTodos } from './todo-state.js'
+import { withAvailableList } from './list-availability.js'
 import { installTranscript, installTranscriptPatch, parseTranscript } from './transcript-state.js'
 
 export function applyHostMessage(
@@ -56,13 +64,19 @@ export function applyHostMessage(
     try {
       setState(installTranscript(state, parseTranscript(message.payload)))
     } catch {
-      /* Invalid windows cannot replace the current transcript. */
+      // A malformed full window needs the same authoritative recovery as a bad patch.
+      if (object(message.payload)?.sessionId === state.activeSessionId) onConnectionEpoch?.()
     }
     return
   }
   if (message.name === 'runtime.update.progress') {
     const progress = parseDshUpdateProgress(message.payload)
     if (progress !== undefined) setState({ ...state, dshUpdateProgress: progress })
+    return
+  }
+  if (message.name === 'connection.output') {
+    const output = connectionOutputSchema.safeParse(message.payload)
+    if (output.success) setState({ ...state, connectionOutput: output.data })
     return
   }
   if (message.name === 'ui.sessions.toggle') {
@@ -79,7 +93,10 @@ export function applyHostMessage(
   if (isSurfaceEventName(message.name)) return
   if (message.name === 'connection.snapshot') {
     const snapshot = object(message.payload)
+    const output = connectionOutputSchema.safeParse(snapshot?.output)
+    if (output.success) state = { ...state, connectionOutput: output.data }
     const kind = snapshot?.kind
+    const phase = CONNECTION_PHASES.find((value) => value === snapshot?.phase)
     const nextConnectionIdentity = connectionIdentity(snapshot)
     const identityChanged =
       kind === 'connected' &&
@@ -175,7 +192,10 @@ export function applyHostMessage(
       else
         setState({
           ...base,
-          backend: { kind },
+          backend: {
+            kind,
+            ...((kind === 'discovering' || kind === 'connecting') && phase !== undefined ? { phase } : {}),
+          },
           connectionEpoch: connectionEpochChanged
             ? (state.connectionEpoch ?? 0) + 1
             : (base.connectionEpoch ?? 0),
@@ -332,6 +352,8 @@ export function applyHostMessage(
     // follows it with a queue/jobs frame when that snapshot is non-empty.
     const queue = event.sessionId !== next.activeSessionId || next.queue.length === 0 ? next.queue : []
     const jobs = event.sessionId !== next.activeSessionId || next.jobs.length === 0 ? next.jobs : []
+    if (event.sessionId === next.activeSessionId && event.controlBaseline !== false)
+      next = withAvailableList(withAvailableList(next, 'queue'), 'jobs')
     const permissions =
       event.controlBaseline === false
         ? next.permissions
@@ -437,12 +459,20 @@ export function applyHostMessage(
     if (!isStale) {
       if (event.asOfSequence !== undefined)
         projectionSequences?.queueBySession.set(event.sessionId, event.asOfSequence)
-      if (event.sessionId === next.activeSessionId && !sameQueuedInputList(next.queue, event.items))
-        next = { ...next, queue: event.items }
+      if (event.sessionId === next.activeSessionId) {
+        next = withAvailableList(next, 'queue')
+        if (!sameQueuedInputList(next.queue, event.items)) next = { ...next, queue: event.items }
+      }
+      if (next.pendingPrompts !== undefined) {
+        const remaining = confirmPendingPrompts(next.pendingPrompts, event.items)
+        if (remaining !== undefined) next = { ...next, pendingPrompts: remaining }
+      }
     }
   } else if (event.type === 'goal.updated' && event.sessionId === next.activeSessionId) {
+    next = withAvailableList(next, 'goals')
     if (!sameGoalList(next.goals, event.goals)) next = { ...next, goals: event.goals }
   } else if (event.type === 'jobs.updated' && event.sessionId === next.activeSessionId) {
+    next = withAvailableList(next, 'jobs')
     if (!sameJobList(next.jobs, event.jobs)) next = { ...next, jobs: event.jobs }
   } else if (event.type === 'job.follow.updated' && event.sessionId === next.activeSessionId) {
     if (next.jobFollow?.jobId === event.jobId && next.jobFollow.followId === event.followId) {
@@ -512,6 +542,7 @@ export function withoutConnectionScopedSurfaces(state: AppState): AppState {
       ),
     },
     sessionDirectoryStatus: 'loading',
+    directPromptReceipts: [],
     queue: [],
     jobs: [],
     jobFollow: undefined,

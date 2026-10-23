@@ -10,7 +10,6 @@
 }
 
 .dsh-app[data-conversation-layout='focused'] .dsh-conversation__topbar {
-  padding-inline: var(--dsh-space-1);
   border-bottom: var(--dsh-border);
 }
 
@@ -53,6 +52,10 @@
 
 .dsh-app[data-conversation-layout='focused'] .dsh-unified-composer:focus-within {
   border-color: var(--dsh-focus-ring);
+}
+
+.dsh-app[data-conversation-layout='focused'] .dsh-composer__quick-tools {
+  background: var(--dsh-surface-soft);
 }
 
 .dsh-app[data-conversation-layout='focused'] .dsh-composer__textarea {
@@ -99,13 +102,6 @@
   max-width: min(24rem, 100%);
 }
 
-.dsh-app[data-conversation-layout='focused']
-  .dsh-model-picker
-  > .dsh-select-menu__trigger
-  .dsh-select-menu__trigger-label {
-  color: var(--dsh-text);
-}
-
 .dsh-app[data-conversation-layout='focused'] .dsh-session-controls--model .dsh-select-menu__trigger-label {
   display: block;
   min-width: 0;
@@ -136,11 +132,11 @@
 }
 
 .dsh-app[data-conversation-layout='focused'] .dsh-composer__submit {
-  width: 36px;
-  height: 36px;
-  min-width: 36px;
-  min-height: 36px;
-  padding: 8px;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 6px;
   border-radius: 50%;
 }
 
@@ -200,7 +196,6 @@
   min-height: 32px;
   border-color: transparent;
   background: transparent;
-  color: var(--dsh-text);
 }
 
 .dsh-app[data-conversation-layout='focused']
@@ -721,36 +716,10 @@
   border-radius: 8px;
 }
 
-/* Keep every picker and Send reachable instead of clipping a narrow rail. */
+/* Context details share the same compact rail in either layout. */
 @container dsh-composer (max-width: 36rem) {
-  .dsh-app[data-conversation-layout='focused']
-    .dsh-session-controls--permission
-    .dsh-select-menu__trigger-label,
-  .dsh-app[data-conversation-layout='focused'] .dsh-session-controls--permission .dsh-select-menu__chevron {
-    display: none;
-  }
-
-  .dsh-app[data-conversation-layout='focused'] .dsh-session-controls--permission .dsh-select-menu__trigger {
-    width: 32px;
-    min-width: 32px;
-    justify-content: center;
-    padding: 4px;
-  }
-
   .dsh-app[data-conversation-layout='focused'] .dsh-session-controls--model .dsh-session-controls__metrics {
     margin-inline-start: 0;
-  }
-}
-
-@container dsh-composer (max-width: 16rem) {
-  .dsh-app[data-conversation-layout='focused'] .dsh-composer__toolbar {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: 'start start' 'controls submit';
-  }
-
-  .dsh-app[data-conversation-layout='focused'] .dsh-session-controls--model {
-    width: 100%;
-    justify-content: flex-start;
   }
 }
 

@@ -2,10 +2,9 @@ import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from '
 
 const DEFAULT_BOTTOM_THRESHOLD = 64
 const USER_SCROLL_IDLE_MS = 220
-const FOLLOW_INPUT_GRACE_MS = 48
 const SCROLL_KEYS = new Set(['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' '])
 
-interface ScheduledFrame {
+interface ScheduledFollow {
   readonly cancel: () => void
 }
 
@@ -33,6 +32,8 @@ export interface ScrollAnchor {
   readonly contentHeight: number
   readonly scrollTop: number
   readonly interactionGeneration: number
+  readonly nodeId?: string
+  readonly nodeOffset?: number
 }
 
 export interface ScrollFollowResult {
@@ -74,23 +75,22 @@ export interface ScrollFollowScheduleOptions {
  * Owns the scroll contract shared by append-only conversation surfaces.
  *
  * There is deliberately one scroll-position writer. Ordinary resize and
- * content updates coalesce into one delayed reconciliation; known layout
- * transitions are corrected synchronously before paint. Native reader intent
- * cancels a pending follow immediately, and the grace period gives wheel,
- * pointer, and keyboard gestures time to arrive before an append-only update
- * is allowed to move the viewport.
+ * content updates coalesce within the current turn; known layout transitions
+ * are corrected synchronously before paint. Captured wheel, pointer and keyboard
+ * gestures cancel a pending follow before native scrolling takes effect.
  */
 export function useScrollFollow(options: ScrollFollowOptions): ScrollFollowResult {
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const stickToBottomRef = useRef(true)
   const previousSessionRef = useRef(options.sessionId)
-  const scheduledFrameRef = useRef<ScheduledFrame | undefined>(undefined)
+  const scheduledFrameRef = useRef<ScheduledFollow | undefined>(undefined)
   const userScrollIdleTimerRef = useRef<number | undefined>(undefined)
   const userScrollActiveRef = useRef(false)
   const interactionGenerationRef = useRef(0)
   const internalScrollTopRef = useRef<number | undefined>(undefined)
   const lastReaderScrollTopRef = useRef<number | undefined>(undefined)
+  const viewportHeightRef = useRef(0)
   const preserveBottomOnLayoutRef = useRef(false)
   const layoutProtectionTimerRef = useRef<number | undefined>(undefined)
   const smoothScrollActiveRef = useRef(false)
@@ -188,11 +188,14 @@ export function useScrollFollow(options: ScrollFollowOptions): ScrollFollowResul
     stickToBottomRef.current = true
     setIsPinnedToBottom(true)
     const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight)
+    // Retain ownership even if layout already clamped to this offset. Chromium
+    // can still deliver the pending scroll event after the resize callback.
+    internalScrollTopRef.current = maxScrollTop
     if (Math.abs(element.scrollTop - maxScrollTop) > 0.5) {
-      internalScrollTopRef.current = maxScrollTop
       element.scrollTop = maxScrollTop
-    } else internalScrollTopRef.current = undefined
+    }
     lastReaderScrollTopRef.current = maxScrollTop
+    viewportHeightRef.current = element.clientHeight
     setShowJumpToLatest(false)
   }, [cancelScheduledFollow, clearUserScrollLock])
 
@@ -261,8 +264,7 @@ export function useScrollFollow(options: ScrollFollowOptions): ScrollFollowResul
       if (preserveBottom && scheduleOptions?.immediate === true) {
         // A known layout transition runs from a layout effect or a
         // ResizeObserver callback. Correct synchronously so the browser never
-        // paints its transient clamped offset before the delayed streaming
-        // reconciliation can run.
+        // paints its transient clamped offset before reconciliation can run.
         cancelScheduledFollow()
         scrollToLatest()
         armLayoutProtection()
@@ -270,9 +272,8 @@ export function useScrollFollow(options: ScrollFollowOptions): ScrollFollowResul
       }
       const shouldFollow = stickToBottomRef.current || preserveBottomOnLayoutRef.current
       if (userScrollActiveRef.current || !shouldFollow || itemCountRef.current === 0) return
-      // Keep one coalesced reconciliation alive. Streaming updates can arrive
-      // faster than a frame; resetting the timer for every update creates a
-      // moving target and increases the chance of racing a native gesture.
+      // Reconcile the latest committed layout once per turn, without a timer
+      // or frame wait. A captured reader gesture can still cancel this write.
       if (scheduledFrameRef.current !== undefined) return
       const scheduledGeneration = interactionGenerationRef.current
 
@@ -293,8 +294,15 @@ export function useScrollFollow(options: ScrollFollowOptions): ScrollFollowResul
         }
       }
 
-      const id = window.setTimeout(run, FOLLOW_INPUT_GRACE_MS)
-      scheduledFrameRef.current = { cancel: () => window.clearTimeout(id) }
+      let cancelled = false
+      scheduledFrameRef.current = {
+        cancel: () => {
+          cancelled = true
+        },
+      }
+      queueMicrotask(() => {
+        if (!cancelled) run()
+      })
     },
     [armLayoutProtection, cancelScheduledFollow, restoreReaderPosition, scrollToLatest],
   )
@@ -304,7 +312,14 @@ export function useScrollFollow(options: ScrollFollowOptions): ScrollFollowResul
     if (element === null) return undefined
     cancelScheduledFollow()
     lastReaderScrollTopRef.current = element.scrollTop
+    const top = element.getBoundingClientRect().top
+    const row = [...element.querySelectorAll<HTMLElement>('[data-node-id]')].find(
+      (node) => node.getBoundingClientRect().bottom > top,
+    )
     return {
+      ...(row?.dataset.nodeId === undefined
+        ? {}
+        : { nodeId: row.dataset.nodeId, nodeOffset: row.getBoundingClientRect().top - top }),
       contentHeight: element.scrollHeight,
       scrollTop: element.scrollTop,
       interactionGeneration: interactionGenerationRef.current,
@@ -320,7 +335,16 @@ export function useScrollFollow(options: ScrollFollowOptions): ScrollFollowResul
     // older history request completed.
     if (Math.abs(element.scrollTop - anchor.scrollTop) > 1) return false
 
-    const heightDelta = element.scrollHeight - anchor.contentHeight
+    const row =
+      anchor.nodeId === undefined
+        ? undefined
+        : [...element.querySelectorAll<HTMLElement>('[data-node-id]')].find(
+            (node) => node.dataset.nodeId === anchor.nodeId,
+          )
+    const heightDelta =
+      row !== undefined && anchor.nodeOffset !== undefined
+        ? row.getBoundingClientRect().top - element.getBoundingClientRect().top - anchor.nodeOffset
+        : element.scrollHeight - anchor.contentHeight
     const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight)
     const nextScrollTop = Math.min(maxScrollTop, Math.max(0, anchor.scrollTop + heightDelta))
     if (Math.abs(element.scrollTop - nextScrollTop) > 0.5) {
@@ -364,10 +388,20 @@ export function useScrollFollow(options: ScrollFollowOptions): ScrollFollowResul
     // A measured virtual canvas can also clamp to a nonzero estimate. Limit
     // that exception to the owning consumer's guarded layout reconciliation;
     // ordinary readers and all captured physical gestures keep control.
+    const viewportResized =
+      viewportHeightRef.current > 0 && viewportHeightRef.current !== element.clientHeight
+    viewportHeightRef.current = element.clientHeight
+    const isViewportLayoutScroll = stickToBottomRef.current && viewportResized && !userScrollActiveRef.current
+    if (isViewportLayoutScroll) {
+      internalScrollTopRef.current = element.scrollTop
+      lastReaderScrollTopRef.current = element.scrollTop
+    }
     const isLayoutScroll =
-      preserveBottomOnLayoutRef.current &&
       !userScrollActiveRef.current &&
-      (element.scrollTop <= 1 || (options.layoutMeasurementsActive === true && stickToBottomRef.current))
+      (isViewportLayoutScroll ||
+        (preserveBottomOnLayoutRef.current &&
+          (element.scrollTop <= 1 ||
+            (options.layoutMeasurementsActive === true && stickToBottomRef.current))))
     if (!isInternalScroll && !isLayoutScroll) {
       // Scroll events are the final source of truth. They also cover input
       // paths that do not reliably expose wheel/pointer intent in a Webview.
@@ -408,6 +442,7 @@ export function useScrollFollow(options: ScrollFollowOptions): ScrollFollowResul
     const element = scrollRef.current
     if (element !== null && lastReaderScrollTopRef.current === undefined)
       lastReaderScrollTopRef.current = element.scrollTop
+    if (element !== null && viewportHeightRef.current <= 0) viewportHeightRef.current = element.clientHeight
     itemCountRef.current = options.itemCount
     scrollHandlerRef.current = handleScroll
   }, [handleScroll, options.itemCount])
@@ -519,6 +554,7 @@ export function useScrollFollow(options: ScrollFollowOptions): ScrollFollowResul
           const measured = viewportSizes.width > 0
           viewportSizes.width = width
           viewportSizes.height = height
+          if (viewportHeightRef.current <= 0) viewportHeightRef.current = element.clientHeight
           // Notifications and in-flow helpers resize the scroll owner without
           // changing its content. Reconcile only through the existing intent
           // guard: a free reader or an active gesture always keeps control.

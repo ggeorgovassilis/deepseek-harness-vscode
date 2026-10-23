@@ -13,7 +13,7 @@ describe('Timeline', () => {
     vi.unstubAllGlobals()
   })
 
-  it('keeps a bottom-pinned conversation at the latest item when the sidebar narrows', () => {
+  it('keeps a bottom-pinned conversation at the latest item when the sidebar narrows', async () => {
     vi.useFakeTimers()
     let resize: ResizeObserverCallback = () => undefined
     vi.stubGlobal(
@@ -44,12 +44,44 @@ describe('Timeline', () => {
     act(() => resize([resizeEntry(canvas, 420, 420)], {} as ResizeObserver))
     scrollHeight = 1_600
     act(() => resize([resizeEntry(canvas, 420, 240)], {} as ResizeObserver))
-    act(() => {
-      vi.runAllTimers()
+    await act(async () => {
+      await vi.runAllTimersAsync()
     })
 
     expect(timeline.scrollTop).toBe(1_300)
     expect(screen.queryByRole('button', { name: 'Jump to latest' })).toBeNull()
+  })
+
+  it('loads a transport-limited input automatically without a full-content button', async () => {
+    const loadFullNode = vi
+      .fn()
+      .mockResolvedValue({ kind: 'user-message', id: 'user-1', markdown: 'complete input' })
+    render(
+      <Timeline
+        sessionId="session-1"
+        streaming={false}
+        omittedNodeIds={['user-1']}
+        loadFullNode={loadFullNode}
+        nodes={[{ kind: 'user-message', id: 'user-1', markdown: 'visible prefix' }]}
+      />,
+    )
+    await screen.findByText('complete input')
+    expect(screen.queryByRole('button', { name: 'Open full content' })).toBeNull()
+  })
+
+  it('can load earlier history when the current window has no visible anchor', () => {
+    const onLoadOlderHistory = vi.fn()
+    render(
+      <Timeline
+        sessionId="s"
+        streaming={false}
+        nodes={[]}
+        hasMoreHistory
+        onLoadOlderHistory={onLoadOlderHistory}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Load earlier' }))
+    expect(onLoadOlderHistory).toHaveBeenCalledOnce()
   })
 
   it('shows tool activity when a live tool is present in the transcript tail', () => {

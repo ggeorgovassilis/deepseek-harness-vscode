@@ -55,6 +55,8 @@ import {
 } from './composer-input.js'
 import { REFERENCE_MENU_ID, ReferencePalette, referenceMenuOptionId } from './ReferencePalette.js'
 import { EditorContextRail } from './EditorContextRail.js'
+import { ComposerQuickTools } from './ComposerQuickTools.js'
+import { useComposerHeightMotion } from './useComposerHeightMotion.js'
 import { ComposerCommandActions } from './ComposerCommandActions.js'
 import { ComposerExtrasMenu } from './ComposerExtrasMenu.js'
 import { ComposerAttachmentActions } from './ComposerAttachmentActions.js'
@@ -75,6 +77,8 @@ export interface ComposerProps {
   readonly attachmentsDisabled?: boolean
   readonly running: boolean
   readonly draft: string
+  /** Conversation identity that owns the draft; undo history resets with it. */
+  readonly draftKey?: string | undefined
   readonly attachments: readonly PromptAttachment[]
   readonly editorContext?: readonly EditorContextItem[]
   readonly editorContextAvailableKinds?: readonly EditorContextKind[]
@@ -107,6 +111,7 @@ export interface ComposerProps {
   readonly presetSelectionEnabled?: boolean
   readonly permissionPresets?: readonly string[]
   readonly configurationDraft?: boolean
+  readonly defaultPermissionPreset?: string
   readonly commands?: readonly DynamicCommand[]
   /** Client-owned bare-command popup decorations; host rows remain authoritative. */
   readonly popupSelects?: PopupSelectRegistry
@@ -126,7 +131,11 @@ export interface ComposerProps {
   readonly attachmentPreviewFailures?: readonly string[]
   readonly onConfigurationChange?: (configuration: AgentConfiguration) => void | Promise<void>
   readonly onPromptModeChange?: (mode: PromptMode) => void
-  readonly onCommand?: (command: string, attachments?: readonly PromptAttachment[]) => Promise<void> | void
+  readonly onCommand?: (
+    command: string,
+    attachments?: readonly PromptAttachment[],
+    signal?: AbortSignal,
+  ) => Promise<void> | void
   readonly onPopupSelect?: (command: string) => void
   readonly onOpenSkillDocument?: (skillId: string) => void
   readonly onCommandQueryChange?: (query: string | undefined) => void
@@ -149,7 +158,7 @@ export interface ComposerProps {
   readonly onCaptureEditorContext?: (kind: EditorContextKind) => Promise<void> | void
   readonly onRemoveEditorContext?: (contextRef: string) => Promise<void> | void
   readonly onPreviewEditorContext?: (contextRef: string) => Promise<EditorContextPreview | undefined>
-  readonly onSubmit: (mode: RunningInputMode) => void | Promise<void>
+  readonly onSubmit: (mode: RunningInputMode, signal?: AbortSignal) => void | Promise<void>
   readonly onCancel: () => void
   /** Steer every still-queued pending input into the running turn. */
   readonly onSteerQueue: () => void | Promise<void>
@@ -163,23 +172,27 @@ export const Composer = memo(function Composer(props: ComposerProps): ReactEleme
   const { t } = useI18n()
   const focused = useConversationLayout()?.layout === 'focused'
   const composerRef = useRef<HTMLFormElement>(null)
+  useComposerHeightMotion(composerRef)
   const composing = useRef(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const hintId = useId()
   const pendingCursorRef = useRef<number | undefined>(undefined)
-  const { restoreDraft } = useDraftHistory(props.draft, props.onDraftChange)
+  const { restoreDraft } = useDraftHistory(props.draft, props.onDraftChange, props.draftKey)
   const { railRef: attachmentRailRef, scrollable: attachmentRailScrollable } = useAttachmentRail(
     props.attachments.length,
   )
   const inputBlocked = props.inputDisabled === true
-  const { isSubmitting, submit, steerQueuedInputs } = useComposerSubmit({
-    disabled: props.disabled,
-    inputBlocked,
-    draft: props.draft,
-    attachments: props.attachments,
-    onSubmit: props.onSubmit,
-    onSteerQueue: props.onSteerQueue,
-  })
+  const { isSubmitting, isDirectSubmitting, cancelSubmission, submit, steerQueuedInputs } = useComposerSubmit(
+    {
+      disabled: props.disabled,
+      inputBlocked,
+      running: props.running,
+      draft: props.draft,
+      attachments: props.attachments,
+      onSubmit: props.onSubmit,
+      onSteerQueue: props.onSteerQueue,
+    },
+  )
   const { previewUri, previewedAttachment, openPreview, closePreview } = useAttachmentLightbox(
     props.attachments,
   )
@@ -255,13 +268,25 @@ export const Composer = memo(function Composer(props: ComposerProps): ReactEleme
     applyCommandSelection,
     insertCommand,
     selectReference,
-  } = useComposerMenuState(props, {
-    setPendingCursor: (cursor) => {
-      pendingCursorRef.current = cursor
+    commandSubmitting,
+    cancelCommand,
+  } = useComposerMenuState(
+    { ...props, submissionBlocked: isSubmitting },
+    {
+      setPendingCursor: (cursor) => {
+        pendingCursorRef.current = cursor
+      },
+      closeExtras: () => changeExtrasOpen(false),
+      focusTextarea: () => textareaRef.current?.focus(),
     },
-    closeExtras: () => changeExtrasOpen(false),
-    focusTextarea: () => textareaRef.current?.focus(),
-  })
+  )
+  const sending = isSubmitting || commandSubmitting
+  const stoppable = sending || props.running
+  const cancel = (): void => {
+    cancelSubmission()
+    cancelCommand()
+    if (!commandSubmitting && (!isSubmitting || isDirectSubmitting)) props.onCancel()
+  }
   const suggestionAnnouncement = menuOpen
     ? menuRows.length > 0
       ? t('composer.commandSuggestionsOpen', { count: menuRows.length })
@@ -304,6 +329,9 @@ export const Composer = memo(function Composer(props: ComposerProps): ReactEleme
       presets,
       permissionPresets,
       ...(props.configurationDraft === undefined ? {} : { configurationDraft: props.configurationDraft }),
+      ...(props.defaultPermissionPreset === undefined
+        ? {}
+        : { defaultPermissionPreset: props.defaultPermissionPreset }),
       disabled: props.configurationDisabled ?? props.disabled,
       presetMutable: props.presetMutable === true,
       surface,
@@ -363,6 +391,10 @@ export const Composer = memo(function Composer(props: ComposerProps): ReactEleme
     composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (sending && event.key === 'Enter' && !event.shiftKey && !isComposingKey(event)) {
+      event.preventDefault()
+      return
+    }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') {
       event.preventDefault()
       restoreDraft(event.shiftKey ? 'redo' : 'undo')
@@ -509,7 +541,7 @@ export const Composer = memo(function Composer(props: ComposerProps): ReactEleme
         event.preventDefault()
         // The primary button is Stop while running (input stays free); the
         // implicit form submit only exists for the idle Send path.
-        if (!props.running) submit('queue')
+        if (!props.running && !sending) submit('queue')
       }}
     >
       {dropState !== undefined ? (
@@ -546,9 +578,7 @@ export const Composer = memo(function Composer(props: ComposerProps): ReactEleme
       <EditorContextRail
         items={editorContext}
         disabled={props.disabled || inputBlocked || props.attachmentsDisabled === true}
-        availableKinds={editorContextAvailableKinds}
         loading={props.editorContextLoading ?? false}
-        {...(props.onCaptureEditorContext === undefined ? {} : { onCapture: props.onCaptureEditorContext })}
         {...(props.onRemoveEditorContext === undefined ? {} : { onRemove: props.onRemoveEditorContext })}
         {...(props.onPreviewEditorContext === undefined ? {} : { onPreview: props.onPreviewEditorContext })}
       />
@@ -558,6 +588,16 @@ export const Composer = memo(function Composer(props: ComposerProps): ReactEleme
         </p>
       ) : null}
       <div className="dsh-composer__input-shell">
+        <ComposerQuickTools
+          disabled={props.disabled || inputBlocked || props.attachmentsDisabled === true}
+          loading={props.editorContextLoading === true}
+          availableKinds={editorContextAvailableKinds}
+          onPickAttachment={() => {
+            changeExtrasOpen(false)
+            props.onPickAttachment()
+          }}
+          {...(props.onCaptureEditorContext === undefined ? {} : { onCapture: props.onCaptureEditorContext })}
+        />
         <textarea
           ref={textareaRef}
           className="dsh-composer__textarea"
@@ -661,30 +701,24 @@ export const Composer = memo(function Composer(props: ComposerProps): ReactEleme
             anchorRef={composerRef}
             onOpenChange={changeExtrasOpen}
           >
-            <div className="dsh-composer__extras-section">
-              <ComposerAttachmentActions
-                disabled={props.disabled || inputBlocked}
-                attachmentsDisabled={props.attachmentsDisabled === true}
-                openFileCandidates={openFileCandidates}
-                defaultOpenFileId={defaultOpenFileId}
-                openFilePickerOpen={props.openFilePickerOpen}
-                openFilePickerLoading={props.openFilePickerLoading}
-                attachedOpenFileIds={props.attachedOpenFileIds}
-                {...(props.attachingOpenFileId === undefined
-                  ? {}
-                  : { attachingOpenFileId: props.attachingOpenFileId })}
-                onPickAttachment={() => {
-                  changeExtrasOpen(false)
-                  props.onPickAttachment()
-                }}
-                onToggleOpenFilePicker={props.onToggleOpenFilePicker}
-                onSelectOpenFile={(candidateId) => {
-                  changeExtrasOpen(false)
-                  if (props.openFilePickerOpen) props.onToggleOpenFilePicker()
-                  props.onSelectOpenFile(candidateId)
-                }}
-              />
-            </div>
+            <ComposerAttachmentActions
+              disabled={props.disabled || inputBlocked}
+              attachmentsDisabled={props.attachmentsDisabled === true}
+              openFileCandidates={openFileCandidates}
+              defaultOpenFileId={defaultOpenFileId}
+              openFilePickerOpen={props.openFilePickerOpen}
+              openFilePickerLoading={props.openFilePickerLoading}
+              attachedOpenFileIds={props.attachedOpenFileIds}
+              {...(props.attachingOpenFileId === undefined
+                ? {}
+                : { attachingOpenFileId: props.attachingOpenFileId })}
+              onToggleOpenFilePicker={props.onToggleOpenFilePicker}
+              onSelectOpenFile={(candidateId) => {
+                changeExtrasOpen(false)
+                if (props.openFilePickerOpen) props.onToggleOpenFilePicker()
+                props.onSelectOpenFile(candidateId)
+              }}
+            />
             {props.commands === undefined || props.commands.length === 0 ? null : (
               <div className="dsh-composer__extras-section">
                 <ComposerCommandActions
@@ -698,7 +732,7 @@ export const Composer = memo(function Composer(props: ComposerProps): ReactEleme
               <div className="dsh-composer__extras-section">{renderSessionControls('secondary')}</div>
             )}
           </ComposerExtrasMenu>
-          {focused ? renderSessionControls('permission') : null}
+          {renderSessionControls('permission')}
           <span
             id={hintId}
             className={focused ? 'dsh-sr-only' : 'dsh-composer__hint'}
@@ -708,17 +742,41 @@ export const Composer = memo(function Composer(props: ComposerProps): ReactEleme
           </span>
         </div>
         {configuration === undefined || onConfigurationChange === undefined ? null : (
-          <div className="dsh-composer__toolbar-controls">
-            {renderSessionControls(focused ? 'model' : 'primary')}
-          </div>
+          <div className="dsh-composer__toolbar-controls">{renderSessionControls('model')}</div>
         )}
         <span className="dsh-composer__toolbar-balance" aria-hidden="true" />
+        {props.running && sending && !isDirectSubmitting ? (
+          <button
+            className="dsh-button dsh-button--danger"
+            type="button"
+            aria-label={t('composer.stopResponse')}
+            title={t('composer.stopResponse')}
+            onClick={props.onCancel}
+            disabled={props.disabled}
+          >
+            <Icon name="stop" />
+            {t('composer.stopResponse')}
+          </button>
+        ) : null}
         <button
-          className={`dsh-button dsh-composer__submit ${props.running ? 'dsh-button--danger' : 'dsh-button--primary'}`}
-          type={props.running ? 'button' : 'submit'}
-          onClick={props.running ? props.onCancel : undefined}
-          aria-label={props.running ? t('composer.stopResponse') : t('composer.sendMessage')}
-          title={props.running ? t('composer.stopResponse') : t('composer.sendMessage')}
+          className={`dsh-button dsh-composer__submit ${stoppable ? 'dsh-button--danger' : 'dsh-button--primary'}`}
+          type={stoppable ? 'button' : 'submit'}
+          onClick={stoppable ? cancel : undefined}
+          aria-label={
+            sending
+              ? t('composer.cancelSend')
+              : props.running
+                ? t('composer.stopResponse')
+                : t('composer.sendMessage')
+          }
+          title={
+            sending
+              ? t('composer.cancelSend')
+              : props.running
+                ? t('composer.stopResponse')
+                : t('composer.sendMessage')
+          }
+          aria-busy={sending}
           onMouseDown={(event) => {
             if (!focused || event.button !== 0 || props.disabled) return
             event.preventDefault()
@@ -726,14 +784,20 @@ export const Composer = memo(function Composer(props: ComposerProps): ReactEleme
           }}
           disabled={
             props.disabled ||
-            (!props.running && inputBlocked) ||
-            (!props.running && isSubmitting) ||
-            (!props.running && props.draft.trim() === '' && props.attachments.length === 0)
+            (!stoppable && inputBlocked) ||
+            (!stoppable && props.draft.trim() === '' && props.attachments.length === 0)
           }
         >
-          <Icon name={props.running ? 'stop' : focused ? 'arrow-up' : 'send'} />
+          {sending ? (
+            <svg className="dsh-composer__sending" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="m9 9 6 6m0-6-6 6" />
+            </svg>
+          ) : (
+            <Icon name={props.running ? 'stop' : focused ? 'arrow-up' : 'send'} />
+          )}
           <span className="dsh-composer__send-label">
-            {props.running ? t('composer.stop') : t('composer.send')}
+            {stoppable ? t('composer.stop') : t('composer.send')}
           </span>
         </button>
       </div>

@@ -18,6 +18,7 @@ import type { AttachmentStore } from '../attachments/attachment-store.js'
 import type { RuntimeInstaller } from '../vscode/install-runtime.js'
 import type { VsCodeConfigurationSource } from '../config/configuration-source.js'
 import { moveOrExplainSecondarySidebar } from '../vscode/secondary-sidebar.js'
+import { openDshWebUi } from '../vscode/open-web-ui.js'
 import { DSH_DOCUMENTATION_URL } from '../constants.js'
 import { deliverOrRevealView } from '../view/deliver-or-reveal.js'
 import type { WebviewMessageRouter } from '../view/message-router.js'
@@ -32,6 +33,7 @@ import { SESSION_DROP_EDITOR_VIEW_TYPE } from '@dsh-vscode/webview-protocol'
 import { createSessionDropEditorProvider } from '../view/session-drop-editor.js'
 import type { RequestGateway } from './request-handler.js'
 import { registerNativeSessionList, SESSION_LIST_VIEW_ID } from '../view/native-session-list.js'
+import { EditorBridgeHost } from '../editor/editor-bridge-host.js'
 
 const TRANSPORT_CONFIGURATION_KEYS = [
   'dsh.connection.mode',
@@ -84,6 +86,7 @@ export interface CommandsAssemblyDependencies {
 }
 
 export interface CommandsAssembly {
+  readonly editorCompanion: EditorBridgeHost
   readonly start: () => Promise<void>
   readonly dispose: () => Promise<void>
 }
@@ -94,6 +97,7 @@ export interface CommandsAssembly {
  * it tears the Webview down before the adapters and the process supervisor.
  */
 export function createCommandsAssembly(deps: CommandsAssemblyDependencies): CommandsAssembly {
+  const editorBridge = new EditorBridgeHost(deps)
   const {
     context,
     configuration,
@@ -143,8 +147,12 @@ export function createCommandsAssembly(deps: CommandsAssemblyDependencies): Comm
     }
   }
   const stateSubscription = coordinator.subscribe(publishState)
+  const outputSubscription = diagnostics.subscribeConnectionOutput((output) => {
+    void postEvent('connection.output', output)
+  })
   const subscriptions: vscode.Disposable[] = [
     stateSubscriptionDisposable(stateSubscription),
+    stateSubscriptionDisposable(outputSubscription),
     provider,
     diagnostics,
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
@@ -229,19 +237,7 @@ export function createCommandsAssembly(deps: CommandsAssemblyDependencies): Comm
               '@ext:Direwolf.deepseek-harness-client',
             )
         },
-        'dsh.openWebUi': async () => {
-          const state = coordinator.getState()
-          if (state.kind !== 'connected') {
-            void vscode.window.showInformationMessage(
-              'Connect to a local DSH instance before opening its Web UI.',
-            )
-            return
-          }
-          const target =
-            endpointLaunchUrls.get(state.backend.endpoint.baseUrl) ?? state.backend.endpoint.baseUrl
-          const opened = await vscode.env.openExternal(vscode.Uri.parse(target))
-          if (!opened) void vscode.window.showWarningMessage('Unable to open the DSH Web UI in your browser.')
-        },
+        'dsh.openWebUi': () => openDshWebUi(coordinator.getState(), endpointLaunchUrls),
         'dsh.installRuntime': () => runtimeInstaller.install(),
         'dsh.selectExecutable': () => runtimeInstaller.selectExecutable(),
         'dsh.copyInstallCommand': () => runtimeInstaller.copyInstallCommand(),
@@ -273,6 +269,11 @@ export function createCommandsAssembly(deps: CommandsAssemblyDependencies): Comm
         'dsh.addFileContext': () => captureEditorContextFromCommand('file'),
         'dsh.addSymbolContext': () => captureEditorContextFromCommand('symbol'),
         'dsh.addDiagnosticContext': () => captureEditorContextFromCommand('diagnostic'),
+        'dsh.shareEditorState': () => editorBridge.enable(),
+        'dsh.stopSharingEditorState': () => editorBridge.stopByUser(),
+        'dsh.manageEditorCompanion': () => editorBridge.manage(),
+        'dsh.installEditorCompanion': () => editorBridge.install(),
+        'dsh.undoEditorEdit': () => editorBridge.undoLastEdit(),
       },
     })
     void postEditorContextAvailabilityEvent()
@@ -289,13 +290,23 @@ export function createCommandsAssembly(deps: CommandsAssemblyDependencies): Comm
           stateKind !== 'connecting' &&
           stateKind !== 'discovering' &&
           stateKind !== 'locating-runtime' &&
-          stateKind !== 'starting'
+          stateKind !== 'starting' &&
+          stateKind !== 'failed' &&
+          stateKind !== 'runtime-missing' &&
+          stateKind !== 'port-conflict'
         )
           return
         // Disconnect invalidates the coordinator generation and aborts an
         // in-flight attach. The shared reconnect operation coalesces this
         // automatic path with an explicit connection.configure reconnect.
-        void reconnectOnTransportChange().catch(() => {
+        void reconnectOnTransportChange().catch((error: unknown) => {
+          if (
+            (error instanceof AppError && error.code === 'REQUEST_CANCELLED') ||
+            (error instanceof Error && error.name === 'AbortError')
+          )
+            return
+          const current = coordinator.getState()
+          if (current.kind === 'connected' || current.kind === 'failed') return
           publishState({ kind: 'failed', message: 'DSH configuration reload failed.', retryable: true })
         })
       }),
@@ -308,6 +319,7 @@ export function createCommandsAssembly(deps: CommandsAssemblyDependencies): Comm
         nativeList?.dispose()
       },
       () => router.cancelAll(),
+      () => editorBridge.dispose(),
       () => disposeAccountLifecycleHost(),
       () => stopAllJobFollows(),
       () => stateSubscription(),
@@ -329,5 +341,5 @@ export function createCommandsAssembly(deps: CommandsAssemblyDependencies): Comm
         cause: errors[0],
       })
   }
-  return { start, dispose }
+  return { start, dispose, editorCompanion: editorBridge }
 }

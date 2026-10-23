@@ -22,22 +22,34 @@ const layoutStyles = readStylesheet(new URL('./layout.css', import.meta.url))
 const appStyles = readStylesheet(new URL('./app.css', import.meta.url), [
   new URL('./compatibility.css', import.meta.url),
 ])
+const focusedStyles = readStylesheet(new URL('./focused-workbench.css', import.meta.url))
+const selectionStyles = readStylesheet(new URL('./components/02-selection.css', import.meta.url))
 
 describe('Conversation space ownership', () => {
-  it('keeps notifications and trajectory details in document flow', () => {
+  it('stacks transcript hydration notices above content so opening a session cannot halve its width', () => {
+    // TimelineRow returns the pending/retrying notice and the message as
+    // siblings. Horizontal flex split a real 224px startup row into two
+    // 112px columns until the full-content response removed the notice.
+    expect(effective(appStyles, '.dsh-timeline__row', 'flex-direction')).toBe('column')
+  })
+
+  it('keeps notifications in document flow', () => {
     const styles = `${appStyles}\n${layoutStyles}`
-    for (const selector of [
-      '.dsh-app__notices',
-      '.dsh-app__notice-summary',
-      '.dsh-app__notice-list',
-      '.dsh-trajectory-inspector',
-    ]) {
+    for (const selector of ['.dsh-app__notices', '.dsh-app__notice-summary', '.dsh-app__notice-list']) {
       expect(ruleBodies(styles, selector).length, selector).toBeGreaterThan(0)
       expect(declared(styles, selector, 'position'), selector).not.toContain('absolute')
       expect(declared(styles, selector, 'position'), selector).not.toContain('fixed')
     }
     expect(effective(styles, '.dsh-app__notice-list', 'overflow')).toBe('auto')
     expect(effective(styles, '.dsh-conversation', 'overflow-y')).toBe('auto')
+  })
+
+  it('floats record details without reserving a row or a second tiny text scroller', () => {
+    expect(effective(layoutStyles, '.dsh-trajectory-inspector', 'position')).toBe('absolute')
+    expect(declared(layoutStyles, '.dsh-trajectory-inspector', 'flex')).toEqual([])
+    expect(effective(layoutStyles, '.dsh-trajectory-inspector', 'overflow-y')).toBe('auto')
+    expect(declared(appStyles, '.dsh-trajectory-inspector__block pre', 'max-height')).toEqual([])
+    expect(declared(appStyles, '.dsh-trajectory-inspector__block pre', 'overflow')).toEqual([])
   })
 
   it('floats the jump control over the transcript instead of claiming a row', () => {
@@ -127,6 +139,93 @@ describe('Form control base styles', () => {
         'input:focus-visible,\ntextarea:focus-visible,\nselect:focus-visible,\nbutton:focus-visible,\nsummary:focus-visible',
       ).join('\n'),
     ).toContain('outline: 1px solid var(--dsh-focus-ring);')
+  })
+})
+
+describe('Readable session choices', () => {
+  it('gives enabled and disabled selectors distinct text in both layouts', () => {
+    expect(effective(selectionStyles, '.dsh-select-menu__trigger', 'color')).toBe('var(--dsh-text)')
+    expect(effective(selectionStyles, '.dsh-select-menu__trigger:disabled', 'color')).toBe('var(--dsh-muted)')
+  })
+
+  it('removes compatibility rules that turn labelled choices into 28px icons', () => {
+    for (const selector of [
+      '.dsh-select-menu--labelled',
+      '.dsh-session-controls__mode',
+      '.dsh-model-picker',
+      '.dsh-session-controls__selectors > .dsh-select-menu',
+      '.dsh-session-controls__selectors > .dsh-session-controls__mode',
+    ]) {
+      for (const body of ruleBodies(compatibilityStyles, selector)) {
+        expect(declaration(body, 'width')).toBeUndefined()
+        expect(declaration(body, 'max-width')).toBeUndefined()
+        expect(declaration(body, 'flex')).toBeUndefined()
+      }
+    }
+  })
+
+  it('reserves a full-width choices rail before text competes with Send', () => {
+    expect(
+      effective(
+        layoutStyles,
+        '.dsh-app .dsh-unified-composer .dsh-composer__toolbar:has(.dsh-session-controls__mode)',
+        'grid-template-areas',
+      ),
+    ).toBe("'controls controls' 'start submit'")
+    expect(focusedStyles).not.toContain("'start start' 'controls submit'")
+  })
+
+  it('does not stack context under the model inside a compressed middle toolbar cell', () => {
+    // At 507 x 142 CSS px (634 x 178 at 125% scale), wrapping this cell
+    // alone put the model above the permission/Send baseline and context below.
+    const selector = '.dsh-app .dsh-unified-composer .dsh-composer__toolbar-controls > .dsh-session-controls'
+    expect(declaration(ruleBodies(layoutStyles, selector)[0] ?? '', 'flex-wrap')).toBe('nowrap')
+    expect(
+      declaration(
+        ruleBodies(
+          layoutStyles,
+          '.dsh-unified-composer .dsh-composer__toolbar-controls .dsh-session-controls__selectors',
+        )[0] ?? '',
+        'flex-wrap',
+      ),
+    ).toBe('nowrap')
+    expect(layoutStyles).toMatch(/@container dsh-composer \(max-width: [\d.]+em\)/u)
+    const compactRail = layoutStyles.slice(layoutStyles.indexOf('@container dsh-composer'))
+    expect(effective(compactRail, selector, 'flex-wrap')).toBe('wrap')
+    expect(
+      effective(
+        compactRail,
+        '.dsh-app .dsh-unified-composer .dsh-composer__toolbar:has(.dsh-session-controls)',
+        'grid-template-areas',
+      ),
+    ).toBe("'controls controls' 'start submit'")
+  })
+
+  it('keeps ordinary sidebars on one row before using the narrow choices rail', () => {
+    // The 40em/52em cutoffs forced even the reported 566px view onto two rows.
+    // Compact spacing and on-demand context details should be used first.
+    const containers = [
+      ...layoutStyles.matchAll(
+        /@container dsh-composer \(([^)]+)\)(?: or \(([^)]+)\))? \{([\s\S]*?)(?=\n@(?:container|media)|$)/gu,
+      ),
+    ]
+    const reflow = containers.filter(([, , , body]) => body?.includes("'controls controls' 'start submit'"))
+    expect(reflow.length).toBeGreaterThan(0)
+    for (const [, scaled, minimum] of reflow) {
+      expect(scaled).toMatch(/^max-width: [\d.]+em$/u)
+      expect(Number.parseFloat(scaled?.split(':')[1] ?? '')).toBeLessThanOrEqual(22)
+      // Icons keep their own minimum size even when message text is smaller.
+      expect(minimum).toMatch(/^max-width: [\d.]+rem$/u)
+      expect(Number.parseFloat(minimum?.split(':')[1] ?? '')).toBeLessThanOrEqual(20)
+    }
+  })
+
+  it('keeps the attachment rail stable while a batch arrives', () => {
+    const wrapping = declared(layoutStyles, '.dsh-unified-composer .dsh-composer__attachments', 'flex-wrap')
+    expect(wrapping.length).toBeGreaterThan(0)
+    // Narrow multi-row attachments made the transcript jump again for every
+    // asynchronously ingested file. Paging must keep all files reachable.
+    for (const value of wrapping) expect(value).toBe('nowrap')
   })
 })
 

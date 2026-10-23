@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, type Mock, type Mocked } from 'vitest'
-import type { SessionSummary } from '@dsh-vscode/domain'
+import type { DshBackend, SessionSummary } from '@dsh-vscode/domain'
 import { createSessionNavigation, type SessionNavigation } from './session-navigation.js'
 
 const state = vi.hoisted(() => ({ trusted: true, execute: vi.fn().mockResolvedValue(undefined) }))
@@ -18,6 +18,7 @@ interface Fixture {
   readonly request: Mock<Parameters<typeof createSessionNavigation>[2]>
   readonly open: Mock<Parameters<typeof createSessionNavigation>[3]>
   readonly ready: Mock<() => Promise<boolean>>
+  readonly retitleEditorTab: Mock<(sessionId: string, title: string) => void>
   readonly signal: AbortSignal
 }
 
@@ -36,7 +37,9 @@ function fixture(): Fixture {
   })
   type Deps = Parameters<typeof createSessionNavigation>[0]
   const deps = {
-    backendService: { requireBackend: vi.fn<Deps['backendService']['requireBackend']>() },
+    backendService: {
+      requireBackend: vi.fn<Deps['backendService']['requireBackend']>().mockReturnValue({} as DshBackend),
+    },
     sessionUseCases: {
       list: vi.fn<Deps['sessionUseCases']['list']>().mockResolvedValue({
         items: [
@@ -68,8 +71,10 @@ function fixture(): Fixture {
   const request = vi.fn<Parameters<typeof createSessionNavigation>[2]>().mockResolvedValue(undefined)
   const open = vi.fn<Parameters<typeof createSessionNavigation>[3]>().mockResolvedValue(undefined)
   const ready = vi.fn().mockResolvedValue(true)
-  const navigation = createSessionNavigation(deps, { waitUntilReady: ready }, request, open)
-  return { deps, request, open, ready, navigation, signal: new AbortController().signal }
+  const retitleEditorTab = vi.fn<(sessionId: string, title: string) => void>()
+  const depsWithRetitle = { ...deps, retitleEditorTab } satisfies Deps
+  const navigation = createSessionNavigation(depsWithRetitle, { waitUntilReady: ready }, request, open)
+  return { deps, request, open, ready, retitleEditorTab, navigation, signal: new AbortController().signal }
 }
 
 describe('shared Host session navigation', () => {
@@ -102,11 +107,36 @@ describe('shared Host session navigation', () => {
     changed.mockClear()
     navigation.acceptEvent('connection.snapshot', { kind: 'connected' })
     navigation.acceptEvent('connection.snapshot', { kind: 'connected' })
-    expect(changed).toHaveBeenCalledExactlyOnceWith('directory')
+    expect(changed).toHaveBeenCalledExactlyOnceWith('connection')
     subscription.dispose()
     changed.mockClear()
     navigation.invalidate()
     expect(changed).not.toHaveBeenCalled()
+  })
+
+  it('blocks reads during attach and transport loss, then refreshes on recovery of the same backend', async () => {
+    const { navigation, deps, signal } = fixture()
+    const backend = deps.backendService.requireBackend()
+    const changed = vi.fn()
+    navigation.onDidChange(changed)
+    vi.mocked(deps.backendService.requireBackend).mockImplementation(() => {
+      throw new Error('not attached')
+    })
+    navigation.acceptEvent('connection.snapshot', { kind: 'connected' })
+    expect(navigation.connected).toBe(false)
+    await expect(navigation.read(signal)).rejects.toMatchObject({ code: 'BACKEND_UNREACHABLE' })
+    expect(deps.sessionUseCases.list).not.toHaveBeenCalled()
+    vi.mocked(deps.backendService.requireBackend).mockReturnValue(backend)
+    navigation.acceptEvent('connection.snapshot', { kind: 'connected' })
+    expect(navigation.connected).toBe(true)
+    await navigation.read(signal)
+    navigation.acceptEvent('connection.lost')
+    expect(navigation.connected).toBe(false)
+    await expect(navigation.read(signal)).rejects.toMatchObject({ code: 'BACKEND_UNREACHABLE' })
+    changed.mockClear()
+    navigation.acceptEvent('connection.snapshot', { kind: 'connected' })
+    expect(changed).toHaveBeenCalledExactlyOnceWith('connection')
+    expect(navigation.connected).toBe(true)
   })
 
   it('opens the sidebar only after ownership, focus and readiness, and keeps editor opening on its existing route', async () => {
@@ -122,6 +152,52 @@ describe('shared Host session navigation', () => {
     deps.requireCurrentWorkspaceSession.mockRejectedValue(new Error('foreign session'))
     await expect(navigation.open('foreign', false, signal)).rejects.toThrow('foreign')
     expect(deps.postEventTo).toHaveBeenCalledOnce()
+  })
+
+  it('retitles an open editor tab when a session title event arrives', () => {
+    const { navigation, retitleEditorTab } = fixture()
+    navigation.acceptEvent('session.title', { sessionId: 's1', title: 'Renamed by DSH' })
+    expect(retitleEditorTab).toHaveBeenCalledExactlyOnceWith('s1', 'Renamed by DSH')
+    retitleEditorTab.mockClear()
+    // A malformed or title-less payload never reaches the tab-label route.
+    navigation.acceptEvent('session.title', { sessionId: 's1' })
+    navigation.acceptEvent('session.title', 'not an object')
+    navigation.acceptEvent('session.title')
+    expect(retitleEditorTab).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['session.projection', { sessionId: 's1', key: 'title', value: 'Projected title' }],
+    [
+      'session.projection.baseline',
+      { projections: { s1: { asOfSequence: 12, values: { title: 'Projected title' } } } },
+    ],
+    [
+      'session.subscribed',
+      { sessionId: 's1', projection: { asOfSequence: 12, values: { title: 'Projected title' } } },
+    ],
+  ])('retitles from the authoritative title in %s', (name, payload) => {
+    const { navigation, retitleEditorTab } = fixture()
+    navigation.acceptEvent(name, payload)
+    expect(retitleEditorTab).toHaveBeenCalledExactlyOnceWith('s1', 'Projected title')
+  })
+
+  it('ignores absent, malformed and unrelated title projections without hiding valid baseline entries', () => {
+    const { navigation, retitleEditorTab } = fixture()
+    navigation.acceptEvent('session.projection', { sessionId: 's1', key: 'messages', value: 'Text' })
+    navigation.acceptEvent('session.projection', { sessionId: 's1', key: 'title', value: null })
+    navigation.acceptEvent('session.projection', { key: 'title', value: 'Missing id' })
+    navigation.acceptEvent('session.subscribed', { sessionId: 's1', projection: { values: {} } })
+    navigation.acceptEvent('session.projection.baseline', { projections: null })
+    navigation.acceptEvent('session.projection.baseline', {
+      projections: {
+        s1: { values: { title: null } },
+        s2: { values: { title: 'Recovered title' } },
+        s3: null,
+        s4: { values: { title: 42 } },
+      },
+    })
+    expect(retitleEditorTab).toHaveBeenCalledExactlyOnceWith('s2', 'Recovered title')
   })
 
   it('uses validated existing mutation routes and refreshes archives without clearing editor context', async () => {

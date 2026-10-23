@@ -162,6 +162,7 @@ export function createRequestGateway(deps: RequestGatewayDependencies): RequestG
   }
   const sessionRequestFor = (surfaceId: string | undefined): ReturnType<typeof createSessionRequestHandler> =>
     createSessionRequestHandler({
+      ...(deps.prepareEditorSession === undefined ? {} : { prepareEditorSession: deps.prepareEditorSession }),
       transcript: deps.transcript.forSurface(surfaceId ?? SIDEBAR_SURFACE_ID),
       ...(deps.resyncView === undefined ? {} : { resyncView: deps.resyncView }),
       backendService,
@@ -222,6 +223,7 @@ export function createRequestGateway(deps: RequestGatewayDependencies): RequestG
     else manager.closeAll()
   }
 
+  let openingConnection: { readonly abort: AbortController; readonly promise: Promise<unknown> } | undefined
   const handleRequest = async (
     request: WebviewRequest,
     signal: AbortSignal,
@@ -235,7 +237,16 @@ export function createRequestGateway(deps: RequestGatewayDependencies): RequestG
       return { updated: true }
     }
     if (request.type === 'app.ready') {
-      if (coordinator.getState().kind !== 'connected') await connect(signal)
+      const opening = openingConnection
+      if (request.payload?.snapshotOnly === true) {
+        // Delivery recovery rereads authority; it never starts or reconnects DSH.
+      } else if (opening !== undefined && !opening.abort.signal.aborted) {
+        try {
+          await opening.promise
+        } finally {
+          if (openingConnection === opening) openingConnection = undefined
+        }
+      } else if (coordinator.getState().kind !== 'connected') await connect(signal)
       signal.throwIfAborted()
       const current = coordinator.getState()
       const surface = surfaceId === undefined ? undefined : surfaces.get(surfaceId)
@@ -249,7 +260,7 @@ export function createRequestGateway(deps: RequestGatewayDependencies): RequestG
           () => !signal.aborted && surfaces.get(surface.surfaceId) === surface,
         )
       } else {
-        await postEvent('connection.snapshot', publicState(current))
+        await postEvent('connection.snapshot', publicState(current, diagnostics.connectionOutput?.()))
       }
       // Joining a surface must not reattach shared services, stop Job follows
       // or broadcast a connection transition to existing chats.
@@ -261,9 +272,16 @@ export function createRequestGateway(deps: RequestGatewayDependencies): RequestG
         }
       return { connected: current.kind === 'connected' }
     }
-    if (request.type === 'connection.configure')
+    if (request.type === 'connection.configure') {
+      openingConnection?.abort.abort()
+      openingConnection = undefined
       return configureConnection(request.payload.mode, request.payload.endpoint, signal)
-    if (request.type === 'connection.retry') return reconnect(signal)
+    }
+    if (request.type === 'connection.retry') {
+      openingConnection?.abort.abort()
+      openingConnection = undefined
+      return reconnect(signal)
+    }
     if (request.type === 'view.openLink') return openMarkdownLink(request.payload.href)
     if (request.type === 'view.showInFolder') return openMarkdownLink(request.payload.href, true)
     if (request.type === 'runtime.action') {
@@ -490,7 +508,7 @@ export function createRequestGateway(deps: RequestGatewayDependencies): RequestG
       )
     }
     if (request.type === 'permissions.presets.list')
-      return publicList(await modelUseCases.listPermissionPresets(signal))
+      return publicValue(await modelUseCases.readPermissionCatalog(signal))
     if (request.type === 'providers.list') return publicList(await modelUseCases.listProviders(signal))
     if (request.type === 'provider.secret.configure') {
       const backend = backendService.requireBackend()
@@ -792,17 +810,37 @@ export function createRequestGateway(deps: RequestGatewayDependencies): RequestG
   ): Promise<void> => {
     // Send the existing connection before the assignment starts session.open.
     // A new editor should immediately show its chat instead of startup UI.
-    await postEventTo(surfaceId, 'connection.snapshot', publicState(coordinator.getState()), isCurrent)
+    await postEventTo(
+      surfaceId,
+      'connection.snapshot',
+      publicState(coordinator.getState(), diagnostics.connectionOutput?.()),
+      isCurrent,
+    )
     await postEventTo(surfaceId, 'ui.surface.assigned', assigned, isCurrent)
     await postEventTo(surfaceId, 'ui.surface.handoff', { editorChats: surfaces.editorCount }, isCurrent)
   }
   const provider = new DshWebviewViewProvider({
     extensionUri: context.extensionUri,
     onMessage: (message) => router.handle(message, SIDEBAR_SURFACE_ID),
+    onViewOpened: () => {
+      if (
+        openingConnection !== undefined ||
+        !['idle', 'failed', 'runtime-missing', 'port-conflict'].includes(coordinator.getState().kind)
+      )
+        return
+      const abort = new AbortController()
+      const promise = connect(abort.signal)
+      openingConnection = { abort, promise }
+      void promise.catch(() => undefined)
+    },
     onBecameReady: () => {
       deps.transcript.setVisible(SIDEBAR_SURFACE_ID, provider.visible)
     },
-    onViewDisposed: () => onSurfaceWorkCancelled(SIDEBAR_SURFACE_ID),
+    onViewDisposed: () => {
+      openingConnection?.abort.abort()
+      openingConnection = undefined
+      onSurfaceWorkCancelled(SIDEBAR_SURFACE_ID)
+    },
     onSurfaceClosed: () => surfaces.unregister(SIDEBAR_SURFACE_ID),
     onVisibilityChanged: (visible) => deps.transcript.setVisible(SIDEBAR_SURFACE_ID, visible),
     onMessageError: logWebviewMessageError,
@@ -837,7 +875,13 @@ export function createRequestGateway(deps: RequestGatewayDependencies): RequestG
     editorSurfaceManager.open(sessionId, editorTabTitle(session.title), column)
   }
   const sessionNavigation = createSessionNavigation(
-    deps,
+    {
+      ...deps,
+      retitleEditorTab: (sessionId, title) => {
+        const accepted = editorTabTitle(title)
+        if (accepted !== undefined) editorSurfaceManager.retitle(sessionId, accepted)
+      },
+    },
     provider,
     (request, signal) => handleRequest(request, signal, undefined),
     openDroppedSession,

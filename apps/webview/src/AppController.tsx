@@ -32,7 +32,7 @@ import { createAppStore, type AppState, type AppStore } from './app/store.js'
 import { sameShallowSelection, useAppStoreSelector } from './app/useAppStoreSelector.js'
 import { selectAppViewState } from './app/store/view-state.js'
 import { selectSessionModels } from './app/store/model-directory-state.js'
-import { readDraft, resetDraft, setDraft } from './app/draft-store.js'
+import { activateDraftOwner, clearDraftIf, readDraft, resetDraft } from './app/draft-store.js'
 import { publicProtocolErrorMessage } from './app/protocol-client.js'
 import { useDshSettings } from './app/useDshSettings.js'
 import { useComposerAttachments } from './app/useComposerAttachments.js'
@@ -107,9 +107,12 @@ const useAppControllerImpl = () => {
       previous = next
     }
     const unsubscribe = store.subscribe(publishFailure)
-    const timer = window.setTimeout(publishFailure, 0)
+    let retired = false
+    queueMicrotask(() => {
+      if (!retired) publishFailure()
+    })
     return () => {
-      window.clearTimeout(timer)
+      retired = true
       unsubscribe()
     }
   }, [store, setError])
@@ -152,33 +155,27 @@ const useAppControllerImpl = () => {
     adoptLocaleFromHost,
     setLocale,
     setThemePreferenceState,
-    setConversationView,
     setError,
     t,
   })
-  const trajectoryVisible = codingToolsEnabled
-  const onConversationTabKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLButtonElement>): void => {
-      const current = event.currentTarget.dataset.conversationView
-      if (current !== 'chat' && current !== 'trajectory') return
-      const views: readonly ('chat' | 'trajectory')[] = trajectoryVisible ? ['chat', 'trajectory'] : ['chat']
-      const currentIndex = views.indexOf(current)
-      let nextIndex: number | undefined
-      if (event.key === 'ArrowRight' || event.key === 'ArrowDown')
-        nextIndex = (currentIndex + 1) % views.length
-      else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp')
-        nextIndex = (currentIndex - 1 + views.length) % views.length
-      else if (event.key === 'Home') nextIndex = 0
-      else if (event.key === 'End') nextIndex = views.length - 1
-      if (nextIndex === undefined) return
-      event.preventDefault()
-      const next = views[nextIndex]
-      if (next === undefined) return
-      setConversationView(next)
-      document.getElementById(CONVERSATION_VIEW_IDS[next].tab)?.focus()
-    },
-    [trajectoryVisible],
-  )
+  const onConversationTabKeyDown = useCallback((event: ReactKeyboardEvent<HTMLButtonElement>): void => {
+    const current = event.currentTarget.dataset.conversationView
+    if (current !== 'chat' && current !== 'trajectory') return
+    const views: readonly ('chat' | 'trajectory')[] = ['chat', 'trajectory']
+    const currentIndex = views.indexOf(current)
+    let nextIndex: number | undefined
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % views.length
+    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp')
+      nextIndex = (currentIndex - 1 + views.length) % views.length
+    else if (event.key === 'Home') nextIndex = 0
+    else if (event.key === 'End') nextIndex = views.length - 1
+    if (nextIndex === undefined) return
+    event.preventDefault()
+    const next = views[nextIndex]
+    if (next === undefined) return
+    setConversationView(next)
+    document.getElementById(CONVERSATION_VIEW_IDS[next].tab)?.focus()
+  }, [])
 
   const setConversationFontSize = useCallback((next: ConversationFontSize): void => {
     setConversationFontSizeState(next)
@@ -324,6 +321,11 @@ const useAppControllerImpl = () => {
     [eventCountNodes, state.timeline.eventCount],
   )
   const activeSessionId = active?.id
+  const composerOwner =
+    state.pendingSession === undefined ? activeSessionId : `pending:${state.pendingSession.revision}`
+  // Switch drafts before the new conversation paints, so a frame of the other
+  // conversation's text can never appear in (or be submitted from) this one.
+  useLayoutEffect(() => activateDraftOwner(composerOwner), [composerOwner])
   const showDshEvents =
     codingToolsEnabled && dshEventVisibility.visible && dshEventVisibility.sessionId !== undefined
       ? dshEventVisibility.sessionId === activeSessionId
@@ -421,21 +423,21 @@ const useAppControllerImpl = () => {
     subagentEntries: state.subagents.entries,
     editorContext: state.editorContext,
     mountedRef,
-    setDraft,
+    draftOwner: composerOwner,
+    clearDraftIf,
     readDraft,
   })
-  const composerOwner =
-    state.pendingSession === undefined ? activeSessionId : `pending:${state.pendingSession.revision}`
   const previousComposerOwner = useRef(composerOwner)
-  useEffect(() => {
+  useLayoutEffect(() => {
     // Superseded navigation resolves without switching the store. Clear the
     // handles only when the displayed conversation actually changes, so a
     // delayed completion cannot discard the new conversation's attachments.
+    // A layout effect (not a passive one) guarantees a submit handler cannot
+    // observe the previous conversation's handles after the switch paints.
     if (composerOwner === undefined || previousComposerOwner.current === composerOwner) return
     previousComposerOwner.current = composerOwner
     discardAttachmentDrafts()
-    if (state.pendingSession !== undefined) setDraft('')
-  }, [composerOwner, discardAttachmentDrafts, state.pendingSession])
+  }, [composerOwner, discardAttachmentDrafts])
   // Runtime status and explicit Turn boundaries come from DSH. A settled
   // assistant step alone never closes a Turn while tools/later steps are active.
   const streaming = activeRunning
@@ -549,13 +551,12 @@ const useAppControllerImpl = () => {
       throw reason
     }),
   )
-  const queueOnRemove = useStableCallback((inputId: string): void => {
-    void store
-      .removeQueue(inputId)
-      .catch((reason: unknown) =>
-        setError(reason instanceof Error ? reason.message : t('app.error.removeQueue')),
-      )
-  })
+  const queueOnRemove = useStableCallback((inputId: string): Promise<void> =>
+    store.removeQueue(inputId).catch((reason: unknown) => {
+      setError(reason instanceof Error ? reason.message : t('app.error.removeQueue'))
+      throw reason
+    }),
+  )
   const queueOnModeChange = useStableCallback((inputId: string, mode: RunningInputMode): void => {
     if (mode !== 'steer') return
     void store
@@ -636,7 +637,11 @@ const useAppControllerImpl = () => {
       )
   })
   const composerOnCommand = useStableCallback(
-    async (command: string, commandAttachments: readonly PromptAttachment[] = []): Promise<void> => {
+    async (
+      command: string,
+      commandAttachments: readonly PromptAttachment[] = [],
+      signal?: AbortSignal,
+    ): Promise<void> => {
       // Client-owned commands run before the session guard: moving the chat back
       // to the side bar must work even when no session is selected.
       if (isMovetoCommandLine(command)) {
@@ -662,14 +667,15 @@ const useAppControllerImpl = () => {
         return
       }
       try {
-        await store.executeCommand(active.id, command, commandAttachments)
+        await store.executeCommand(active.id, command, commandAttachments, signal)
         if (commandAttachments.length > 0)
           removeAttachmentDrafts(
             commandAttachments.map((attachment) => attachment.uri),
             true,
           )
       } catch (reason: unknown) {
-        setError(reason instanceof Error ? reason.message : t('app.error.dshMode'))
+        if (signal?.aborted !== true)
+          setError(reason instanceof Error ? reason.message : t('app.error.dshMode'))
         throw reason
       }
     },
@@ -884,7 +890,6 @@ const useAppControllerImpl = () => {
     branching,
     busyAction,
     codingToolsEnabled,
-    trajectoryVisible,
     compatibilityWarning,
     composerOnCancel,
     composerOnCaptureEditorContext,

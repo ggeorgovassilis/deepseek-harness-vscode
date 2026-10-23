@@ -28,7 +28,7 @@ import { sameWorkspacePath } from './composition/workspace-state.js'
 import { createSessionScope } from './composition/session-scope.js'
 import { createUseCasesAssembly } from './composition/use-cases-assembly.js'
 import { createConnectionLifecycle, createRuntimeAssembly } from './composition/connection-assembly.js'
-import { createHostEventPipeline } from './composition/host-event-pipeline.js'
+import { createHostEventPipeline, isBulkEvent } from './composition/host-event-pipeline.js'
 import { createChangeCheckpointTaskAssembly } from './composition/change-checkpoint-task-assembly.js'
 import { createJobFollowHost } from './composition/job-follow-host.js'
 import { createBackendAttach } from './composition/backend-attach.js'
@@ -89,9 +89,11 @@ export function createCompositionRoot(context: vscode.ExtensionContext): Composi
   }
   const post = (message: HostMessage | FeatureHostMessage): Thenable<boolean> => {
     const envelope = hostEnvelope(message)
-    if (envelope !== undefined && message.type === 'event')
-      nativeNavigation.current?.acceptEvent(message.name, message.payload)
-    return envelope === undefined ? Promise.resolve(false) : surfaces.post(envelope)
+    if (envelope === undefined) return Promise.resolve(false)
+    return surfaces.post(envelope, (surfaceId) => {
+      if (message.type === 'event' && message.name !== 'ui.resync' && !isBulkEvent(message.name))
+        void postEventTo(surfaceId, 'ui.resync', {})
+    })
   }
   const postTo = (surfaceId: string, message: HostMessage | FeatureHostMessage): Thenable<boolean> => {
     const envelope = hostEnvelope(message)
@@ -210,6 +212,11 @@ export function createCompositionRoot(context: vscode.ExtensionContext): Composi
         invalidate: (sessionId) => {
           void postEventTo(surfaceId, 'session.transcript.invalidated', { sessionId }, isCurrent)
         },
+        report: ({ attempt, retrying }) =>
+          diagnostics.log('warn', 'transcript-delivery-failed', {
+            attempt,
+            retrying,
+          }),
       }),
     (surfaceId) => {
       const surface = surfaces.get(surfaceId)
@@ -232,6 +239,7 @@ export function createCompositionRoot(context: vscode.ExtensionContext): Composi
     transcript,
     post,
     postTo,
+    onEvent: (name, payload) => nativeNavigation.current?.acceptEvent(name, payload),
     backendService,
     diagnostics,
     editorContextUseCases,
@@ -313,6 +321,7 @@ export function createCompositionRoot(context: vscode.ExtensionContext): Composi
     currentWorkspaceFolderId,
   })
   const { handleFeatureRequest } = createFeatureRequestHandler({
+    editorCompanion: () => commands.editorCompanion,
     getAccountLifecycleHost,
     backendService,
     pluginInstallRequests,
@@ -335,6 +344,7 @@ export function createCompositionRoot(context: vscode.ExtensionContext): Composi
     currentWorkspaceFolders,
   })
   const gateway = createRequestGateway({
+    prepareEditorSession: (sessionId, signal) => commands.editorCompanion.prepareSession(sessionId, signal),
     transcript,
     resyncView: async () => {
       const backend = backendService.requireBackend()

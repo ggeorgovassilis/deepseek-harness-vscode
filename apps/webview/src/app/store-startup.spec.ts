@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ModelDescriptor, ModelProvider } from '@dsh-vscode/domain'
+import { CONNECTION_PHASES, type ModelDescriptor, type ModelProvider } from '@dsh-vscode/domain'
 import type { HostMessage } from '@dsh-vscode/webview-protocol'
 import type { ProtocolClient } from './protocol-client.js'
 import {
@@ -158,6 +158,74 @@ function startupResponse(request: WebviewRequest): unknown {
 }
 
 describe('AppStore startup session restoration', () => {
+  it('replays safe connection output from snapshots and accepts live replacement without changing backend state', () => {
+    const client = new StartupClient(startupResponse, false)
+    const store = createAppStore(client as unknown as ProtocolClient)
+    const entry = {
+      id: 1,
+      time: '2026-10-18T05:00:00.000Z',
+      elapsedMs: 0,
+      phase: 'connect',
+      status: 'started',
+      mode: 'auto',
+    }
+    try {
+      client.emit({
+        type: 'event',
+        name: 'connection.snapshot',
+        sequence: 1,
+        payload: { kind: 'connecting', phase: 'verification', output: [entry] },
+      })
+      expect(store.getState().connectionOutput).toEqual([entry])
+      const backend = store.getState().backend
+      const result = { ...entry, id: 2, phase: 'discovery', status: 'succeeded', count: 2 }
+      client.emit({ type: 'event', name: 'connection.output', sequence: 2, payload: [entry, result] })
+      expect(store.getState().connectionOutput).toEqual([entry, result])
+      expect(store.getState().backend).toBe(backend)
+      client.emit({
+        type: 'event',
+        name: 'connection.output',
+        sequence: 3,
+        payload: [{ ...result, token: 'private' }],
+      })
+      expect(store.getState().connectionOutput).toEqual([entry, result])
+      client.emit({ type: 'event', name: 'connection.output', sequence: 4, payload: [] })
+      expect(store.getState().connectionOutput).toEqual([])
+    } finally {
+      store.dispose()
+    }
+  })
+  it('accepts safe Host connection phases and clears stale or unrecognized phases', () => {
+    const client = new StartupClient(startupResponse, false)
+    const store = createAppStore(client as unknown as ProtocolClient)
+    let sequence = 1
+    try {
+      const snapshots = [
+        ...CONNECTION_PHASES.map((phase) => ({
+          kind: phase === 'discovery' ? 'discovering' : 'connecting',
+          phase,
+        })),
+        { kind: 'connecting', phase: 'future-private-operation' },
+        { kind: 'discovering', phase: { endpoint: 'private' } },
+        { kind: 'starting', phase: 'verification' },
+        { kind: 'connecting' },
+        { kind: 'connected', phase: 'initialization' },
+      ]
+      for (const payload of snapshots) {
+        client.emit({ type: 'event', name: 'connection.snapshot', sequence: sequence++, payload })
+        const phase = CONNECTION_PHASES.find((value) => value === payload.phase)
+        expect(store.getState().backend).toEqual({
+          kind: payload.kind,
+          ...((payload.kind === 'discovering' || payload.kind === 'connecting') && phase !== undefined
+            ? { phase }
+            : {}),
+        })
+      }
+    } finally {
+      store.dispose()
+    }
+  })
+
   it('waits for the connected snapshot before restoring and opens once across duplicate snapshots', async () => {
     const client = new StartupClient(startupResponse, false)
     const store = createAppStore(client as unknown as ProtocolClient)
@@ -2374,6 +2442,136 @@ it('refreshes goal activation without allowing an older read to overwrite the la
   await Promise.resolve()
   expect(store.goals).toEqual([goal])
   store.dispose()
+})
+
+describe('advisory list recovery', () => {
+  const lists = [
+    { type: 'goal.list', key: 'goals', event: 'goal.updated', field: 'goals' },
+    { type: 'session.queue.list', key: 'queue', event: 'queue.updated', field: 'items' },
+    { type: 'job.list', key: 'jobs', event: 'jobs.updated', field: 'jobs' },
+  ] as const
+
+  it.each(lists)(
+    'clears a failed $key read on a valid active-session snapshot, including identical empty lists',
+    async ({ type, key, event, field }) => {
+      const client = new StartupClient((request) => {
+        if (request.type === type) throw new Error('Temporary read failure')
+        return startupResponse(request)
+      })
+      const store = createAppStore(client as unknown as ProtocolClient)
+      try {
+        await store.openSession(activeSession.id)
+        await vi.waitFor(() => expect(store.unavailableLists).toContain(key))
+        client.emit({
+          type: 'event',
+          sequence: 100,
+          name: event,
+          payload: { sessionId: 'another-session', [field]: [] },
+        })
+        expect(store.unavailableLists).toContain(key)
+        client.emit({
+          type: 'event',
+          sequence: 101,
+          name: event,
+          payload: { sessionId: activeSession.id, [field]: [] },
+        })
+        expect(store.unavailableLists).not.toContain(key)
+      } finally {
+        store.dispose()
+      }
+    },
+  )
+
+  it.each(lists)(
+    'does not reinstall a late $key read failure after a live snapshot',
+    async ({ type, key, event, field }) => {
+      let fail: (error: Error) => void = () => undefined
+      const client = new StartupClient((request) => {
+        if (request.type === type)
+          return new Promise((_resolve, reject) => {
+            fail = reject
+          })
+        return startupResponse(request)
+      })
+      const store = createAppStore(client as unknown as ProtocolClient)
+      try {
+        await store.openSession(activeSession.id)
+        client.emit({
+          type: 'event',
+          sequence: 102,
+          name: event,
+          payload: { sessionId: activeSession.id, [field]: [] },
+        })
+        fail(new Error('Outdated read failed'))
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        expect(store.unavailableLists).not.toContain(key)
+      } finally {
+        store.dispose()
+      }
+    },
+  )
+
+  it('clears the goal warning after a successful activation refresh even when the list is unchanged', async () => {
+    let recover = false
+    const client = new StartupClient((request) => {
+      if (request.type === 'goal.list') {
+        if (!recover) throw new Error('Temporary goal read failure')
+        return []
+      }
+      return startupResponse(request)
+    })
+    const store = createAppStore(client as unknown as ProtocolClient)
+    try {
+      await store.openSession(activeSession.id)
+      await vi.waitFor(() => expect(store.unavailableLists).toContain('goals'))
+      recover = true
+      client.emit({
+        type: 'event',
+        sequence: 103,
+        name: 'remote.event',
+        payload: { name: 'goal/activation-changed', args: [{ sessionId: activeSession.id }] },
+      })
+      await vi.waitFor(() => expect(store.unavailableLists).not.toContain('goals'))
+      expect(store.goals).toEqual([])
+    } finally {
+      store.dispose()
+    }
+  })
+
+  it('keeps a newer goal snapshot when an earlier activation read resolves', async () => {
+    let pending: ((value: unknown) => void) | undefined
+    const client = new StartupClient((request) => {
+      if (request.type === 'goal.list' && pending !== undefined)
+        return new Promise((resolve) => {
+          pending = resolve
+        })
+      return startupResponse(request)
+    })
+    const store = createAppStore(client as unknown as ProtocolClient)
+    try {
+      await store.openSession(activeSession.id)
+      pending = () => undefined
+      client.emit({
+        type: 'event',
+        sequence: 104,
+        name: 'remote.event',
+        payload: { name: 'goal/activation-changed', args: [{ sessionId: activeSession.id }] },
+      })
+      const goal = { id: 'g1', title: 'Current goal', status: 'in-progress', activation: 'armed' }
+      client.emit({
+        type: 'event',
+        sequence: 105,
+        name: 'goal.updated',
+        payload: { sessionId: activeSession.id, goals: [goal] },
+      })
+      pending?.([])
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      expect(store.goals).toEqual([goal])
+      expect(store.unavailableLists).not.toContain('goals')
+    } finally {
+      store.dispose()
+    }
+  })
 })
 
 it('reports failed advisory lists instead of presenting an empty success', async () => {

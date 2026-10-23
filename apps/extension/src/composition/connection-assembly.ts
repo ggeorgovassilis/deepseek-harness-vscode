@@ -61,6 +61,14 @@ import { hasLocalWorkspaceAuthority } from '../view/session-workspace-scope.js'
 
 const execFileAsync = promisify(execFile)
 const RUNTIME_PATH_STATE_KEY = 'dsh.runtime.lastKnownPath'
+
+/** F5 explicitly requests a fresh owned runtime instead of discovering a stale companion. */
+function usesDevelopmentRuntime(context: Pick<vscode.ExtensionContext, 'extensionMode'>): boolean {
+  return (
+    process.env.DSH_VSCODE_DEV_MANAGED_RUNTIME === '1' &&
+    context.extensionMode === vscode.ExtensionMode.Development
+  )
+}
 export interface RuntimeAssemblyDependencies {
   readonly context: vscode.ExtensionContext
   readonly configuration: VsCodeConfigurationSource
@@ -148,7 +156,10 @@ export function createRuntimeAssembly(deps: RuntimeAssemblyDependencies): Runtim
   })
   const discovery = new CompositeInstanceDiscovery([
     new ConfiguredPortDiscoveryProvider(
-      () => configuration.read().connection.attachPorts,
+      () => {
+        const connection = configuration.read().connection
+        return connection.attachPortsConfigured === true ? connection.attachPorts : []
+      },
       () => configuration.read().connection.serverUrl,
     ),
     new KnownInstanceDiscoveryProvider(context.workspaceState),
@@ -225,7 +236,7 @@ export function createRuntimeAssembly(deps: RuntimeAssemblyDependencies): Runtim
   const probe = new VersionedBackendProbe(adapters, { fetch: network.fetch })
   const factory = new VersionedBackendFactory(adapters)
   const supervisor = new DshProcessSupervisor({
-    managedPort: () => configuration.read().connection.managedPort,
+    managedPort: () => (usesDevelopmentRuntime(context) ? 0 : configuration.read().connection.managedPort),
     workingDirectory: () => currentWorkspaceFolder()?.uri.fsPath ?? process.cwd(),
     toolMode: () => configuration.read().defaultAgent.toolMode,
     spawn: spawnManagedChild,
@@ -238,6 +249,7 @@ export function createRuntimeAssembly(deps: RuntimeAssemblyDependencies): Runtim
     backendFactory: factory,
     processSupervisor: supervisor,
     endpointPreparation: externalConnection,
+    onProgress: (progress) => diagnostics.connectionProgress(progress),
   })
   const backendService = new BackendService()
   let runtimeInstall: { readonly key: string; readonly operation: Promise<RuntimeCommandResult> } | undefined
@@ -390,32 +402,57 @@ export function createConnectionLifecycle(deps: ConnectionLifecycleDependencies)
   } = deps
   const connect = async (signal?: AbortSignal): Promise<unknown> => {
     const current = configuration.read()
+    const development = usesDevelopmentRuntime(context)
+    const mode = development ? 'new-isolated' : current.connection.mode
     const hasWorkspaceFolder = currentWorkspaceFolders().length > 0
-    const customEndpoint =
-      current.connection.mode === 'custom' ? endpointFromServerUrl(current.connection.serverUrl) : undefined
+    const useConfiguredEndpoint =
+      mode === 'custom' ||
+      ((mode === 'auto' || mode === 'attach-only') &&
+        current.connection.serverUrl !== undefined &&
+        current.connection.serverUrl.trim() !== '')
+    const customEndpoint = useConfiguredEndpoint
+      ? endpointFromServerUrl(current.connection.serverUrl)
+      : undefined
+    const allowedEndpoints =
+      !useConfiguredEndpoint && mode !== 'new-isolated' && current.connection.attachPortsConfigured === true
+        ? current.connection.attachPorts.map((port) => ({
+            host: '127.0.0.1' as const,
+            port,
+            baseUrl: `http://127.0.0.1:${port}`,
+          }))
+        : undefined
     const request: ConnectionRequest = {
-      mode: current.connection.mode,
-      ...(current.connection.mode === 'custom'
-        ? { credentialRevision: externalConnection?.revision ?? 0 }
-        : {}),
+      mode: useConfiguredEndpoint ? 'custom' : mode,
+      ...(useConfiguredEndpoint ? { credentialRevision: externalConnection?.revision ?? 0 } : {}),
       ...(customEndpoint === undefined ? {} : { endpoint: customEndpoint }),
+      ...(allowedEndpoints === undefined ? {} : { allowedEndpoints }),
       ...(current.connection.runtimeVersion === undefined || current.connection.runtimeVersion === ''
         ? {}
         : { runtimeVersion: current.connection.runtimeVersion }),
       // A workspace that has not been trusted may attach to an existing
       // host. An empty window is safe to isolate in a temporary workspace,
       // but an untrusted project folder must never auto-start DSH.
-      autoStart: current.runtime.autoStart && (vscode.workspace.isTrusted || !hasWorkspaceFolder),
+      autoStart:
+        (development || current.runtime.autoStart) && (vscode.workspace.isTrusted || !hasWorkspaceFolder),
     }
     const result = await coordinator.connect(request, signal)
-    // A remote port must never become a remembered local discovery candidate.
-    await context.workspaceState.update(
-      'dsh.lastEndpoint',
-      isLoopbackEndpoint(result.backend.connection.endpoint)
-        ? { port: result.backend.connection.endpoint.port }
-        : undefined,
-    )
+    signal?.throwIfAborted()
     await attach(result.backend)
+    signal?.throwIfAborted()
+    // A remote port must never become a remembered local discovery candidate.
+    // Persistence is optional and must not hold a healthy UI on the loading page.
+    void context.workspaceState
+      .update(
+        'dsh.lastEndpoint',
+        isLoopbackEndpoint(result.backend.connection.endpoint)
+          ? {
+              host: result.backend.connection.endpoint.host,
+              port: result.backend.connection.endpoint.port,
+              ...(result.backend.connection.pid === undefined ? {} : { pid: result.backend.connection.pid }),
+            }
+          : undefined,
+      )
+      .then(undefined, () => undefined)
     // Commands may connect before the Webview exists. app.ready must always
     // receive a fresh authoritative snapshot even when the initial publish
     // had no recipient.
@@ -423,21 +460,31 @@ export function createConnectionLifecycle(deps: ConnectionLifecycleDependencies)
     return { connected: true }
   }
   let reconnectOperation: Promise<unknown> | undefined
-  const reconnect = async (signal?: AbortSignal): Promise<unknown> => {
-    if (reconnectOperation !== undefined) return reconnectOperation
+  let reconnectAbort: AbortController | undefined
+  const reconnect = async (signal?: AbortSignal, replace = false): Promise<unknown> => {
+    if (reconnectOperation !== undefined && !replace) return reconnectOperation
+    reconnectAbort?.abort(new DOMException('Connection settings changed.', 'AbortError'))
+    const abort = new AbortController()
+    reconnectAbort = abort
+    const operationSignal = signal === undefined ? abort.signal : AbortSignal.any([signal, abort.signal])
     const operation = (async (): Promise<unknown> => {
+      operationSignal.throwIfAborted()
       await disposeAccountLifecycleHost()
+      operationSignal.throwIfAborted()
       detachSessionAdapters()
       endpointLaunchUrls.clear()
       await coordinator.disconnect()
+      operationSignal.throwIfAborted()
       await externalConnection?.release()
-      return connect(signal)
+      operationSignal.throwIfAborted()
+      return connect(operationSignal)
     })()
     reconnectOperation = operation
     try {
       return await operation
     } finally {
       if (reconnectOperation === operation) reconnectOperation = undefined
+      if (reconnectAbort === abort) reconnectAbort = undefined
     }
   }
   // A transport-settings change the configuration listener observed. While
@@ -448,6 +495,7 @@ export function createConnectionLifecycle(deps: ConnectionLifecycleDependencies)
   // explicit reconnect.
   let configuringTransport = false
   let configurationQueue: Promise<void> = Promise.resolve()
+  let configurationRevision = 0
   const writeTransportSettings = async (
     settings: vscode.WorkspaceConfiguration,
     writes: readonly (readonly [string, unknown])[],
@@ -456,13 +504,14 @@ export function createConnectionLifecycle(deps: ConnectionLifecycleDependencies)
   }
   const reconnectOnTransportChange = (signal?: AbortSignal): Promise<unknown> => {
     if (configuringTransport) return Promise.resolve(undefined)
-    return reconnect(signal)
+    return reconnect(signal, true)
   }
   const configureConnection = async (
     mode: 'auto' | 'custom',
     endpoint: string | undefined,
     signal?: AbortSignal,
   ): Promise<unknown> => {
+    signal?.throwIfAborted()
     let writes: readonly (readonly [string, unknown])[]
     if (mode === 'custom') {
       const normalized = normalizeServerUrl(endpoint ?? '')
@@ -487,11 +536,14 @@ export function createConnectionLifecycle(deps: ConnectionLifecycleDependencies)
         ['connection.serverUrl', ''],
       ]
     }
-    // Serialize the whole transaction, including its reconnect: overlapping
-    // submissions must not interleave endpoint/mode writes or share a reconnect
-    // whose request describes the preceding transaction.
+    const revision = ++configurationRevision
+    reconnectAbort?.abort(new DOMException('Connection settings changed.', 'AbortError'))
+    // Serialize settings writes, while a newer submission cancels an obsolete
+    // network attempt instead of waiting for its timeout.
     const operation = configurationQueue.then(async () => {
       signal?.throwIfAborted()
+      if (revision !== configurationRevision)
+        throw new DOMException('Connection settings changed.', 'AbortError')
       configuringTransport = true
       try {
         if (mode === 'custom' && externalConnection !== undefined) {
@@ -506,11 +558,10 @@ export function createConnectionLifecycle(deps: ConnectionLifecycleDependencies)
         }
         signal?.throwIfAborted()
         await writeTransportSettings(vscode.workspace.getConfiguration('dsh'), writes)
-        // A reconnect already in flight may have read the previous settings.
-        // Its failure must not suppress this new, explicit attempt either.
-        await reconnectOperation?.catch(() => undefined)
+        if (revision !== configurationRevision)
+          throw new DOMException('Connection settings changed.', 'AbortError')
         signal?.throwIfAborted()
-        return await reconnect(signal)
+        return await reconnect(signal, true)
       } finally {
         configuringTransport = false
       }

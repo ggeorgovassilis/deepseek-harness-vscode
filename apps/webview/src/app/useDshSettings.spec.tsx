@@ -106,7 +106,6 @@ function setupSettings(
   const adoptLocaleFromHost = vi.fn()
   const setLocale = vi.fn()
   const setThemePreferenceState = vi.fn()
-  const setConversationView = vi.fn()
   const setError = vi.fn()
   const t = vi.fn((key: string): string => key)
   const store = { getState: () => state, readDshSettings, updateDshSetting } as unknown as AppStore
@@ -118,7 +117,6 @@ function setupSettings(
         adoptLocaleFromHost,
         setLocale,
         setThemePreferenceState,
-        setConversationView,
         setError,
         t,
       }),
@@ -162,6 +160,34 @@ describe('useDshSettings generation fencing', () => {
     await waitFor(() => expect(readDshSettings).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(settings.result.current.codingToolsEnabled).toBe(false))
     expect(settings.result.current.readyDshUiPreferences).toBeUndefined()
+  })
+
+  it('keeps roster preset selection independent of the Developer Tools preference', async () => {
+    // Coding Tools only removes the shipped PTC/Minimal presets from the menu.
+    // Treating it as a master switch made a healthy roster unusable whenever
+    // the preference was off, including when the Host still reported it off.
+    const settings = setupSettings(connectedState(), {
+      readDshSettings: vi.fn().mockResolvedValue(dshUiSettingsSnapshot(false)),
+    })
+
+    await waitFor(() => expect(settings.result.current.codingToolsEnabled).toBe(false))
+    expect(settings.result.current.newSessionPresetSelectionEnabled).toBe(true)
+  })
+
+  it('keeps roster preset selection while the settings read is failing', async () => {
+    const settings = setupSettings(connectedState(), {
+      readDshSettings: vi.fn().mockRejectedValue(new Error('offline')),
+    })
+
+    await waitFor(() => expect(settings.result.current.codingToolsEnabled).toBe(false))
+    expect(settings.result.current.newSessionPresetSelectionEnabled).toBe(true)
+  })
+
+  it('still honors a host roster that disables preset selection', async () => {
+    const settings = setupSettings(connectedState({ presetSelectionEnabled: false }))
+
+    await waitFor(() => expect(settings.result.current.readyDshUiPreferences).toBeDefined())
+    expect(settings.result.current.newSessionPresetSelectionEnabled).toBe(false)
   })
 
   it('rereads settings when the backend identity changes at the same DSH version', async () => {
