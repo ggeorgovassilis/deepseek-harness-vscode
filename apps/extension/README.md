@@ -5,7 +5,7 @@ Bring local or remote [DeepSeek Harness](https://github.com/deepseek-ai/deepseek
 ## Use the companion
 
 - Create, switch, resume, and archive sessions by workspace.
-- Send text, images, and supported files; reference files and sessions with `@`.
+- Send text, images, and supported files; drag files from the Explorer into the composer while holding Shift to attach them, and reference files and sessions with `@`.
 - Use the models, providers, permissions, and agent options supplied by the connected DSH.
 - Open produced files through VS Code, and use local templates, checkpoints, Changes, and task views when available.
 - Use the compact DSH-style focused layout, or switch to the classic layout in **Settings → General → Conversation layout**.

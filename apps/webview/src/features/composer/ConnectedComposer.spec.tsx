@@ -66,6 +66,7 @@ function composerProps(): Omit<ComposerProps, 'draft' | 'onDraftChange'> {
     attachedOpenFileIds: [],
     onPickAttachment: vi.fn(),
     onIngestFiles: vi.fn(),
+    onAttachResources: vi.fn(),
     onToggleOpenFilePicker: vi.fn(),
     onSelectOpenFile: vi.fn(),
     onRemoveAttachment: vi.fn(),

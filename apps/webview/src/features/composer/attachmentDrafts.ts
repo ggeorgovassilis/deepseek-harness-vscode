@@ -16,6 +16,15 @@ export type AttachmentDraftOrigin =
       readonly kind: 'open-file'
       readonly id: string
     }
+  | {
+      readonly kind: 'dropped-resource'
+      /**
+       * The URI the workbench put on the drag payload. It already reached the
+       * Webview as drop data and stays here only as a draft identity; the
+       * Extension Host never returns it.
+       */
+      readonly id: string
+    }
 
 /** Build a stable, presentation-safe identity for one draft attachment. */
 export function attachmentDraftKey(
@@ -27,7 +36,11 @@ export function attachmentDraftKey(
       ? 'opaque'
       : origin.kind === 'open-file'
         ? `open:${stableText(origin.id)}`
-        : `file:${origin.sizeBytes}:${origin.lastModified}:${stableText(origin.relativePath)}`
+        : origin.kind === 'dropped-resource'
+          ? // Resources are case-sensitive: two workspace files may differ only
+            // by case, so this identity is not normalized like pasted names.
+            `drop:${origin.id}`
+          : `file:${origin.sizeBytes}:${origin.lastModified}:${stableText(origin.relativePath)}`
   return [originKey, stableText(attachment.name), stableText(attachment.mimeType)].join('\u0000')
 }
 

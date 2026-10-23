@@ -52,6 +52,7 @@ export function AppView(props: ReturnType<typeof useAppController>): ReactElemen
     codingToolsEnabled,
     compatibilityWarning,
     composerOnCancel,
+    composerOnAttachResources,
     composerOnCaptureEditorContext,
     composerOnCommand,
     composerOnCommandQueryChange,
@@ -373,6 +374,7 @@ export function AppView(props: ReturnType<typeof useAppController>): ReactElemen
                       onConfigurationChange={(configuration) => store.configurePendingSession(configuration)}
                       onPickAttachment={composerOnPickAttachment}
                       onIngestFiles={composerOnIngestFiles}
+                      onAttachResources={composerOnAttachResources}
                       openFileCandidates={EMPTY_OPEN_FILE_CANDIDATES}
                       openFilePickerOpen={false}
                       openFilePickerLoading={false}
@@ -789,6 +791,7 @@ export function AppView(props: ReturnType<typeof useAppController>): ReactElemen
                           onReferenceQueryChange={composerOnReferenceQueryChange}
                           onPickAttachment={composerOnPickAttachment}
                           onIngestFiles={composerOnIngestFiles}
+                          onAttachResources={composerOnAttachResources}
                           attachmentPreviews={attachmentPreviews}
                           attachmentPreviewFailures={attachmentPreviewFailures}
                           openFileCandidates={visibleOpenFileCandidates}

@@ -17,4 +17,15 @@ describe('attachment draft identity', () => {
       attachmentDraftKey({ name: 'notes.txt', mimeType: 'text/plain' }),
     )
   })
+
+  it('keeps dropped resource identity case-sensitive so sibling files do not collapse', () => {
+    const attachment = { name: 'Index.ts', mimeType: 'application/typescript' }
+    expect(attachmentDraftKey(attachment, { kind: 'dropped-resource', id: 'file:///w/Index.ts' })).not.toBe(
+      attachmentDraftKey(attachment, { kind: 'dropped-resource', id: 'file:///w/index.ts' }),
+    )
+    // The same drop is recognized as the same draft.
+    expect(attachmentDraftKey(attachment, { kind: 'dropped-resource', id: 'file:///w/Index.ts' })).toBe(
+      attachmentDraftKey(attachment, { kind: 'dropped-resource', id: 'file:///w/Index.ts' }),
+    )
+  })
 })

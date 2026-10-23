@@ -17,6 +17,7 @@ function baseProps(): Parameters<typeof Composer>[0] {
     onDraftChange: vi.fn(),
     onPickAttachment: vi.fn(),
     onIngestFiles: vi.fn(),
+    onAttachResources: vi.fn(),
     openFileCandidates: [{ id: 'dsh-open-file-current', name: 'LICENSE', active: true, supported: true }],
     openFilePickerOpen: false,
     openFilePickerLoading: false,
@@ -316,6 +317,35 @@ describe('Composer', () => {
     fireEvent.drop(form, { dataTransfer: { files: [file], types: ['Files'] } })
     expect(form.className).not.toContain('dsh-composer--dragging')
     expect(onIngestFiles).toHaveBeenCalledWith([file])
+  })
+
+  it('attaches a resource dragged from the VS Code Explorer', () => {
+    const onAttachResources = vi.fn()
+    render(<Composer {...baseProps()} onAttachResources={onAttachResources} />)
+    const form = composerForm()
+    fireEvent.dragEnter(form, { dataTransfer: { types: ['resourceurls', 'text/plain'] } })
+    expect(form.className).toContain('dsh-composer--dragging')
+    expect(screen.getByText('Drop to attach the Explorer file')).toBeDefined()
+    fireEvent.drop(form, {
+      dataTransfer: {
+        types: ['resourceurls', 'text/plain'],
+        getData: (format: string) =>
+          format === 'resourceurls' ? JSON.stringify(['file:///fixture/notes.md']) : '',
+      },
+    })
+    expect(form.className).not.toContain('dsh-composer--dragging')
+    expect(onAttachResources).toHaveBeenCalledExactlyOnceWith(['file:///fixture/notes.md'], 0)
+  })
+
+  it('asks the Host to resolve a resource drag that carried no attachable URI', () => {
+    const onAttachResources = vi.fn()
+    const onIngestFiles = vi.fn()
+    render(<Composer {...baseProps()} onAttachResources={onAttachResources} onIngestFiles={onIngestFiles} />)
+    fireEvent.drop(composerForm(), {
+      dataTransfer: { types: ['codefiles'], getData: () => JSON.stringify(['C:\\fixture\\folder']) },
+    })
+    expect(onIngestFiles).not.toHaveBeenCalled()
+    expect(onAttachResources).toHaveBeenCalledExactlyOnceWith([], 0)
   })
 
   it('uses host-backed @ candidates and inserts a safe file mention', () => {

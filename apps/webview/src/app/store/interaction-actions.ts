@@ -3,6 +3,7 @@ import type { ProtocolClient } from '../protocol-client.js'
 import { requestId } from './ids.js'
 import {
   attachmentFromResult,
+  droppedAttachmentsFromResult,
   imageDataUri,
   mergeEditorContext,
   openFileCandidatesFromResult,
@@ -26,6 +27,7 @@ export type InteractionActionMethods = Pick<
   | 'releaseAttachments'
   | 'listOpenFiles'
   | 'attachOpenFile'
+  | 'attachDroppedResources'
   | 'openLink'
   | 'showInFolder'
 >
@@ -194,6 +196,21 @@ export function createInteractionActions(
         return { kind: 'context', contextRef: item.ref.contextRef }
       }
       return attachmentFromResult(result)
+    },
+    attachDroppedResources: async (uris, signal) => {
+      // The Host reads the dropped resources through its own file system and
+      // returns opaque handles; nothing about the path comes back to the
+      // Webview beyond the file name it already saw in the drag.
+      return droppedAttachmentsFromResult(
+        await client.request<unknown>(
+          {
+            type: 'attachment.drop.attach',
+            requestId: requestId(),
+            payload: { uris: [...uris] },
+          },
+          signal,
+        ),
+      )
     },
     openLink: async (href) => {
       const result = object(

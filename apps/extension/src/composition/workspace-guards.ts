@@ -46,6 +46,7 @@ export function requiresTrustedWorkspace(type: WebviewRequest['type']): boolean 
     case 'session.configure':
     case 'attachment.pick':
     case 'attachment.ingest':
+    case 'attachment.drop.attach':
     case 'attachment.preview':
     case 'attachment.open.list':
     case 'attachment.open.attach':

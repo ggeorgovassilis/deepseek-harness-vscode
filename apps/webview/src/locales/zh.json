@@ -1793,5 +1793,9 @@
   "editorIntegration.restart": "重启 DSH",
   "editorIntegration.undo": "撤销上一次 Agent 编辑",
   "editorIntegration.startManaged": "使用独立 DSH 实例",
-  "transcript.syncLoading": "正在读取完整内容，当前显示尚未完整。"
+  "transcript.syncLoading": "正在读取完整内容，当前显示尚未完整。",
+  "composer.dropResources": "松开以附加资源管理器中的文件",
+  "app.error.dropNothingAttachable": "该拖放没有可附加的文件。仅支持当前工作区内的普通文件。",
+  "app.error.dropRejected": "有 {count} 个拖放的文件未能附加。",
+  "app.error.dropAttach": "无法附加拖放的文件。"
 }

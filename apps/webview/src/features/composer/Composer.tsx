@@ -143,6 +143,8 @@ export interface ComposerProps {
   readonly onDraftChange: (value: string | ((current: string) => string)) => void
   readonly onPickAttachment: () => void
   readonly onIngestFiles: (files: readonly File[]) => void
+  /** Workspace resource URIs dropped from the VS Code Explorer, tabs or other lists. */
+  readonly onAttachResources: (uris: readonly string[], ignored: number) => void
   readonly openFileCandidates: readonly OpenFileCandidate[]
   readonly openFilePickerOpen: boolean
   readonly openFilePickerLoading: boolean
@@ -225,11 +227,14 @@ export const Composer = memo(function Composer(props: ComposerProps): ReactEleme
       ingestFiles(event.clipboardData.files)
     }
   }
-  const { dragging, dropState, onDragEnter, onDragOver, onDragLeave, onDrop } = useComposerDragDrop({
-    disabled: props.disabled,
-    attachmentsDisabled: props.attachmentsDisabled === true,
-    ingestFiles,
-  })
+  const { dragging, dropState, dropKind, onDragEnter, onDragOver, onDragLeave, onDrop } = useComposerDragDrop(
+    {
+      disabled: props.disabled,
+      attachmentsDisabled: props.attachmentsDisabled === true,
+      ingestFiles,
+      attachResources: props.onAttachResources,
+    },
+  )
   const configuration = props.configuration
   const onConfigurationChange = props.onConfigurationChange
   const onCommand = props.onCommand
@@ -555,12 +560,14 @@ export const Composer = memo(function Composer(props: ComposerProps): ReactEleme
           <span>
             {dropState === 'blocked'
               ? t('composer.dropBlocked')
-              : props.imageLimits === undefined
-                ? t('composer.drop')
-                : t('composer.dropWithLimits', {
-                    count: props.imageLimits.maxImagesPerMessage,
-                    size: formatByteSize(props.imageLimits.maxImageBytes),
-                  })}
+              : dropKind === 'resources'
+                ? t('composer.dropResources')
+                : props.imageLimits === undefined
+                  ? t('composer.drop')
+                  : t('composer.dropWithLimits', {
+                      count: props.imageLimits.maxImagesPerMessage,
+                      size: formatByteSize(props.imageLimits.maxImageBytes),
+                    })}
           </span>
         </div>
       ) : null}

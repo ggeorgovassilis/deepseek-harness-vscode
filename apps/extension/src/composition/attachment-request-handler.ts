@@ -1,7 +1,7 @@
 import * as vscode from 'vscode'
 import path from 'node:path'
 import { AppError } from '@dsh-vscode/domain'
-import type { WebviewRequest } from '@dsh-vscode/webview-protocol'
+import { MAX_PROMPT_ATTACHMENT_TOTAL_BYTES, type WebviewRequest } from '@dsh-vscode/webview-protocol'
 import {
   decodeCanonicalBase64,
   MAX_ATTACHMENT_BYTES,
@@ -10,6 +10,7 @@ import {
 } from '../attachments/attachment-store.js'
 import {
   attachmentMimeType,
+  attachmentSizeLimit,
   isImageMimeType,
   prepareAttachment,
   isAttachmentSupported,
@@ -21,6 +22,9 @@ import type { RequestGatewayDependencies } from './request-gateway-dependencies.
 import { unsupportedRequest } from './request-routing.js'
 
 type AttachmentRequest = Extract<WebviewRequest, { type: `attachment.${string}` }>
+/** One dropped URI's resolution: bytes to keep, an exhausted batch budget, or a refusal. */
+type DroppedRead =
+  { readonly input: StoredAttachmentInput; readonly size: number } | 'over-budget' | undefined
 type AttachmentDependencies = Pick<
   RequestGatewayDependencies,
   | 'backendService'
@@ -59,6 +63,56 @@ export function createAttachmentRequestHandler(
     assertAttachmentSupported(input, supportsBinaryAttachments())
     return attachmentTokens.remember(input)
   }
+
+  /**
+   * Resolve one URI from a workbench drag into attachment bytes.
+   *
+   * The Webview cannot read a dropped resource itself and never holds the
+   * authority to decide what a URI means. Membership in an open workspace
+   * folder is the only scope accepted here, and the bytes are read through
+   * `workspace.fs` so a remote window reads on its own side instead of handing
+   * a client path to a Node file API. `undefined` means "not attachable" (a
+   * folder, a symlink, a missing or unreadable file) and `'over-budget'` means
+   * the rest of the drop no longer fits the message; an empty, oversized,
+   * malformed or unsupported file throws the codec's own `AppError`.
+   */
+  const readDroppedResource = async (
+    raw: string,
+    signal: AbortSignal,
+    remainingBytes: number,
+  ): Promise<DroppedRead> => {
+    const uri = droppedWorkspaceUri(raw)
+    if (uri === undefined) return undefined
+    const name = path.posix.basename(uri.path)
+    if (name === '') return undefined
+    // Images and text have different budgets, and the name decides which one
+    // applies before any bytes are materialized.
+    const sizeLimit = attachmentSizeLimit(name)
+    const info = await Promise.resolve(vscode.workspace.fs.stat(uri)).catch(() => undefined)
+    signal.throwIfAborted()
+    if (
+      info === undefined ||
+      (info.type & vscode.FileType.File) === 0 ||
+      (info.type & vscode.FileType.SymbolicLink) !== 0
+    )
+      return undefined
+    if (info.size > sizeLimit) throw droppedFileTooLarge()
+    // A drop is the only attachment entry point that can name many files at
+    // once, so it also has to respect the per-message budget the prompt schema
+    // enforces instead of materializing the whole selection first.
+    if (info.size > remainingBytes) return 'over-budget'
+    const read = await Promise.resolve(vscode.workspace.fs.readFile(uri)).catch(() => undefined)
+    signal.throwIfAborted()
+    if (read === undefined) return undefined
+    const bytes = Buffer.from(read)
+    if (bytes.length === 0) throw droppedFileEmpty()
+    if (bytes.length > sizeLimit) throw droppedFileTooLarge()
+    // A provider may understate `stat`; the bytes it returned still count
+    // against what this message can carry.
+    if (bytes.length > remainingBytes) return 'over-budget'
+    return { input: prepareAttachment(name, bytes), size: Math.max(info.size, bytes.length) }
+  }
+
   return async (request: AttachmentRequest, signal: AbortSignal): Promise<unknown> => {
     if (request.type === 'attachment.pick') {
       signal.throwIfAborted()
@@ -128,6 +182,54 @@ export function createAttachmentRequestHandler(
         cancelled: false,
         attachment: rememberSupportedAttachment(prepareAttachment(name, bytes, mimeType)),
       }
+    }
+
+    if (request.type === 'attachment.drop.attach') {
+      const attachments: ReturnType<typeof attachmentTokens.remember>[] = []
+      const failures: AppError[] = []
+      let rejected = 0
+      let totalBytes = 0
+      // A drag repeats the same resource across several transfer types; attach
+      // each file once even if it arrives twice.
+      const uris = [...new Set(request.payload.uris)]
+      for (const raw of uris) {
+        signal.throwIfAborted()
+        let prepared: DroppedRead
+        try {
+          prepared = await readDroppedResource(raw, signal, MAX_PROMPT_ATTACHMENT_TOTAL_BYTES - totalBytes)
+        } catch (error) {
+          if (!(error instanceof AppError)) throw error
+          failures.push(error)
+          rejected += 1
+          continue
+        }
+        if (prepared === 'over-budget') {
+          // This file does not fit what is left of the message; keep trying the
+          // smaller ones instead of abandoning the rest of the drop.
+          rejected += 1
+          continue
+        }
+        if (prepared === undefined) {
+          rejected += 1
+          continue
+        }
+        try {
+          attachments.push(rememberSupportedAttachment(prepared.input))
+          totalBytes += prepared.size
+        } catch (error) {
+          if (!(error instanceof AppError)) throw error
+          failures.push(error)
+          rejected += 1
+        }
+      }
+      // Nothing attached: surface the most specific refusal the codec produced
+      // (unsupported bytes, capacity) instead of an empty, silent drop.
+      if (attachments.length === 0) {
+        const failure = failures[0]
+        if (failure !== undefined) throw failure
+        return { cancelled: true, rejected }
+      }
+      return { cancelled: false, attachments, rejected }
     }
 
     if (request.type === 'attachment.preview') {
@@ -200,4 +302,38 @@ export function createAttachmentRequestHandler(
     }
     return unsupportedRequest(request)
   }
+}
+
+/**
+ * A workbench drag payload is a URI string produced by VS Code for the resource
+ * the user picked up. Only a resource inside an open workspace folder is in
+ * scope: the folder check is also what keeps a crafted Webview request from
+ * reading an arbitrary path, and it matches the folder identity for whichever
+ * provider scheme the window is using.
+ */
+function droppedWorkspaceUri(raw: string): vscode.Uri | undefined {
+  let uri: vscode.Uri
+  try {
+    uri = vscode.Uri.parse(raw, true)
+  } catch {
+    return undefined
+  }
+  if (uri.fsPath === '' && uri.path === '') return undefined
+  return vscode.workspace.getWorkspaceFolder(uri) === undefined ? undefined : uri
+}
+
+function droppedFileTooLarge(): AppError {
+  return new AppError({
+    code: 'INVALID_CONFIGURATION',
+    message: 'The dropped file is too large to attach.',
+    retryable: false,
+  })
+}
+
+function droppedFileEmpty(): AppError {
+  return new AppError({
+    code: 'INVALID_CONFIGURATION',
+    message: 'The dropped file is empty.',
+    retryable: false,
+  })
 }

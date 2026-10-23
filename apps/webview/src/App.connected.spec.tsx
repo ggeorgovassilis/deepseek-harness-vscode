@@ -361,6 +361,7 @@ function storeFor(state: AppState): AppStore {
     releaseAttachments: vi.fn().mockResolvedValue(undefined),
     listOpenFiles: vi.fn().mockResolvedValue([]),
     attachOpenFile: vi.fn().mockResolvedValue(undefined),
+    attachDroppedResources: vi.fn().mockResolvedValue(undefined),
     rememberOpenFile: vi.fn(),
     openLink: vi.fn().mockResolvedValue(undefined),
     showInFolder: vi.fn().mockResolvedValue(undefined),
@@ -2174,6 +2175,38 @@ describe('App connected rendering', () => {
       resolveIngest?.(undefined)
       await Promise.resolve()
     })
+  })
+
+  it('attaches a file dropped from the VS Code Explorer as a draft chip', async () => {
+    const state = connectedState(true)
+    const attachment = {
+      uri: 'dsh-attachment:00000000-0000-4000-8000-000000000021',
+      name: 'notes.md',
+      mimeType: 'text/markdown',
+    }
+    const attachDroppedResources = vi.fn().mockResolvedValue({ attachments: [attachment], rejected: 0 })
+    currentStore = { ...storeFor(state), attachDroppedResources }
+    render(<App />)
+
+    const prompt = screen.getByRole('textbox', { name: 'Prompt' })
+    const form = prompt.closest('form') as HTMLFormElement
+    fireEvent.drop(form, {
+      dataTransfer: {
+        types: ['resourceurls', 'text/plain'],
+        getData: (format: string) =>
+          format === 'resourceurls' ? JSON.stringify(['file:///fixture/notes.md']) : '',
+      },
+    })
+
+    // The Host resolves the dropped URI into an opaque handle; the Webview only
+    // sees the name it already had on the drag.
+    await waitFor(() =>
+      expect(attachDroppedResources).toHaveBeenCalledWith(
+        ['file:///fixture/notes.md'],
+        expect.any(AbortSignal),
+      ),
+    )
+    expect(await screen.findByText('file: notes.md')).toBeDefined()
   })
 
   it('waits for a pasted attachment to finish ingesting before sending', async () => {

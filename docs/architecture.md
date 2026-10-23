@@ -50,7 +50,7 @@ PID 不证明所有权。发现先于启动、单个 in-flight 连接和显式�
 
 Remote SSH、WSL 和 Dev Container 中，Extension Host 与 DSH 位于工作区一侧，Webview 显示在本地；PATH、全局包、进程、端口和文件操作均以 **Extension Host 所在平台**为准。已知实例的持久提示只保存经验证的 loopback port，不把完整 endpoint 或凭据写入工作区状态；读取旧格式时也必须重新校验 loopback。
 
-原生附件选择保留完整 URI，并通过 `workspace.fs` 读取相应文件系统；客户端路径不能交给远端 Node 文件 API。桌面远程 Inspector 只转发已验证的 loopback Worker，原生转发结果必须仍是客户端 loopback，保持固定 CDP 路径；地址仅在 Host 的打开/复制动作使用。状态查询不建立转发，取消或连接更换后不执行客户端动作；浏览器客户端明确返回原生 DevTools 不可用。
+原生附件选择保留完整 URI，并通过 `workspace.fs` 读取相应文件系统；客户端路径不能交给远端 Node 文件 API。资源管理器、编辑器标签和其他工作台列表拖入聊天时，Webview 只把工作台随拖放给出、且经用户手势携带的资源 URI 原样交给 Host；Host 以当前窗口的 `workspaceFolder` 归属为唯一作用域，只接受普通文件并同样经 `workspace.fs` 读取，失败逐个拒绝且不把 URI 回显给 Webview。拖放无法提供资源 URI 时（例如文件夹）明确拒绝，不按名称或附近信息猜测目标文件。桌面远程 Inspector 只转发已验证的 loopback Worker，原生转发结果必须仍是客户端 loopback，保持固定 CDP 路径；地址仅在 Host 的打开/复制动作使用。状态查询不建立转发，取消或连接更换后不执行客户端动作；浏览器客户端明确返回原生 DevTools 不可用。
 
 ## Host 与 Webview 消息
 

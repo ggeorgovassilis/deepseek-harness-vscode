@@ -35,6 +35,35 @@ export const attachmentRequestSchemas = [
       payload: z.object({ uris: z.array(attachmentUri).min(1).max(MAX_PROMPT_ATTACHMENTS) }).strict(),
     })
     .strict(),
+  z
+    .object({
+      // VS Code workbench drags (the Explorer, open tabs, other workbench lists) carry
+      // resource URIs, never bytes. The Webview forwards the user's dropped
+      // URIs as an attach request; the Host resolves each one against the
+      // current workspace folders, reads it through `workspace.fs`, and returns
+      // the same opaque handle as every other attachment. A URI is only ever
+      // admitted when it names a regular file inside an open workspace folder.
+      type: z.literal('attachment.drop.attach'),
+      ...requestBase,
+      payload: z
+        .object({
+          uris: z
+            .array(
+              z
+                .string()
+                .trim()
+                .min(1)
+                .max(2048)
+                // An absolute URI with a scheme; a bare or relative path is not
+                // a resource the Host can attribute to a provider.
+                .regex(/^[A-Za-z][A-Za-z0-9+.-]+:/u),
+            )
+            .min(1)
+            .max(MAX_PROMPT_ATTACHMENTS),
+        })
+        .strict(),
+    })
+    .strict(),
   z.object({ type: z.literal('attachment.open.list'), ...requestBase }).strict(),
   z
     .object({

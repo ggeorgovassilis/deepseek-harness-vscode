@@ -70,6 +70,8 @@ export interface ComposerAttachments {
   readonly composerOnReferenceQueryChange: (query: string | undefined, quoted: boolean) => void
   readonly composerOnPickAttachment: () => void
   readonly composerOnIngestFiles: (files: readonly File[]) => void
+  /** Files dragged from the VS Code Explorer, tabs or other workbench lists. */
+  readonly composerOnAttachResources: (uris: readonly string[], ignored: number) => void
   readonly composerOnToggleOpenFilePicker: () => void
   readonly composerOnExtrasOpenChange: (open: boolean) => void
   readonly composerOnSelectOpenFile: (candidateId: string) => void
@@ -118,11 +120,17 @@ export function useComposerAttachments(deps: ComposerAttachmentDependencies): Co
   const openFilePickerRequestRef = useRef(0)
   const attachmentGenerationRef = useRef(0)
   const admissionWaitsRef = useRef(new Set<() => void>())
+  /** Reads a dropped resource the Host is still answering for this composer. */
+  const pendingDropReadsRef = useRef<Set<AbortController>>(new Set())
 
   useEffect(() => {
     const waits = admissionWaitsRef.current
+    const dropReads = pendingDropReadsRef.current
     return () => {
       for (const cancel of waits) cancel()
+      // A closed composer never shows these handles; stop reading instead of
+      // letting the Host finish and hand them to nobody.
+      for (const controller of dropReads) controller.abort()
     }
   }, [])
 
@@ -289,6 +297,7 @@ export function useComposerAttachments(deps: ComposerAttachmentDependencies): Co
   }
   const discardAttachmentDrafts = useStableCallback((): void => {
     attachmentGenerationRef.current += 1
+    for (const controller of pendingDropReadsRef.current) controller.abort()
     const inFlight = inFlightAttachmentUrisRef.current
     const uris = attachmentsRef.current.map((attachment) => attachment.uri)
     // A submission in flight may already have handed these handles to the
@@ -799,6 +808,55 @@ export function useComposerAttachments(deps: ComposerAttachmentDependencies): Co
       )
   })
   const composerOnIngestFiles = useStableCallback((files: readonly File[]): void => ingestFiles(files))
+  const composerOnAttachResources = useStableCallback((uris: readonly string[], ignored: number): void => {
+    if (uris.length === 0) {
+      // A resource drag that carried no attachable URI: most often a folder, or
+      // a transfer the workbench released before the drop handler ran.
+      setError(t('app.error.dropNothingAttachable'))
+      return
+    }
+    const generation = attachmentGenerationRef.current
+    const controller = new AbortController()
+    pendingDropReadsRef.current.add(controller)
+    void store
+      .attachDroppedResources(uris, controller.signal)
+      .then((result) => {
+        if (result === undefined || result.attachments.length === 0) {
+          setError(t('app.error.dropNothingAttachable'))
+          return
+        }
+        if (generation !== attachmentGenerationRef.current) {
+          // The composer moved on while the Host was reading; these handles
+          // have no chip to belong to.
+          void store
+            .releaseAttachments(result.attachments.map((attachment) => attachment.uri))
+            .catch(() => undefined)
+          return
+        }
+        // Pairing a receipt with its dropped URI is only safe 1:1. A partial
+        // drop would mislabel one file's chip as another's, so those drafts
+        // fall back to name-based duplicate detection.
+        const paired = result.attachments.length === uris.length
+        result.attachments.forEach((attachment, index) => {
+          const uri = paired ? uris[index] : undefined
+          appendAttachment(
+            attachment,
+            undefined,
+            generation,
+            uri === undefined ? undefined : { kind: 'dropped-resource', id: uri },
+          )
+        })
+        if (result.rejected + ignored > 0)
+          setError(t('app.error.dropRejected', { count: result.rejected + ignored }))
+      })
+      .catch((reason: unknown) => {
+        // An aborted read belongs to a composer that already discarded its
+        // drafts; it has no chip to report against.
+        if (controller.signal.aborted) return
+        setError(reason instanceof Error ? reason.message : t('app.error.dropAttach'))
+      })
+      .finally(() => pendingDropReadsRef.current.delete(controller))
+  })
   const composerOnToggleOpenFilePicker = useStableCallback((): void => toggleOpenFilePicker())
   const composerOnExtrasOpenChange = useStableCallback((open: boolean): void => {
     if (!open) {
@@ -836,6 +894,7 @@ export function useComposerAttachments(deps: ComposerAttachmentDependencies): Co
     composerOnReferenceQueryChange,
     composerOnPickAttachment,
     composerOnIngestFiles,
+    composerOnAttachResources,
     composerOnToggleOpenFilePicker,
     composerOnExtrasOpenChange,
     composerOnSelectOpenFile,

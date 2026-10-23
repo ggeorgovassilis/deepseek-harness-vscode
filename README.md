@@ -12,7 +12,7 @@
 ## What you can do
 
 - Create, switch, resume, and archive sessions in a workspace.
-- Send text, images, and supported files; reference files or sessions with `@`.
+- Send text, images, and supported files; drag files from the Explorer into the composer while holding Shift to attach them, and reference files or sessions with `@`.
 - Follow tool progress, answer questions and approvals, and open produced files through VS Code.
 - Choose the models, providers, permissions, and agent options exposed by the connected DSH runtime.
 - Use local prompt templates, checkpoints, a Changes view, and a task center when their prerequisites are available.

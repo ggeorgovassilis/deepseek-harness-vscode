@@ -7,9 +7,10 @@ import {
   type PromptAttachment,
   type PromptTemplateVariable,
 } from '@dsh-vscode/domain'
+import { MAX_PROMPT_ATTACHMENTS } from '@dsh-vscode/webview-protocol'
 import { translate } from '../../i18n.js'
 import { optionalGeneration, optionalString } from './scalars.js'
-import type { OpenFileCandidate } from './types.js'
+import type { DroppedAttachments, OpenFileCandidate } from './types.js'
 import { object } from './unknown-record.js'
 
 export function promptTemplateVariables(values: readonly string[]): PromptTemplateVariable[] {
@@ -162,6 +163,28 @@ export function attachmentFromResult(resultValue: unknown): PromptAttachment | u
     name: attachment.name,
     ...(typeof attachment.mimeType === 'string' ? { mimeType: attachment.mimeType } : {}),
   }
+}
+
+/**
+ * Read the Host's dropped-resource receipts. `cancelled` still carries the
+ * rejected count: a drop of nothing attachable is a refusal, not a failure the
+ * composer should stay silent about.
+ */
+export function droppedAttachmentsFromResult(resultValue: unknown): DroppedAttachments | undefined {
+  const result = object(resultValue)
+  if (result === undefined) return undefined
+  const rejected =
+    typeof result.rejected === 'number' && Number.isSafeInteger(result.rejected) && result.rejected > 0
+      ? result.rejected
+      : 0
+  if (result.cancelled === true) return { attachments: [], rejected: Math.max(1, rejected) }
+  if (!Array.isArray(result.attachments)) return undefined
+  const receipts = (result.attachments as readonly unknown[]).slice(0, MAX_PROMPT_ATTACHMENTS)
+  const attachments = receipts.flatMap((value): PromptAttachment[] => {
+    const attachment = attachmentFromResult({ cancelled: false, attachment: value })
+    return attachment === undefined ? [] : [attachment]
+  })
+  return { attachments, rejected }
 }
 
 export function imageDataUri(value: unknown): string | undefined {

@@ -111,6 +111,17 @@ export interface IngestedFile {
 }
 
 /**
+ * Outcome of attaching workspace resources dropped from the VS Code
+ * workbench. `rejected` counts the dropped files the Host refused (outside a
+ * workspace folder, not a regular file, unsupported bytes, over capacity);
+ * those never surface as chips, so the composer reports them as a group.
+ */
+export interface DroppedAttachments {
+  readonly attachments: readonly PromptAttachment[]
+  readonly rejected: number
+}
+
+/**
  * Host-projected connection state. The Webview deliberately receives only
  * lifecycle facts that are safe and useful to render; endpoint, process
  * handles, command lines, and credentials stay in the Extension Host.
@@ -409,6 +420,11 @@ export interface AppActions {
     candidateId: string,
     isCurrent: () => boolean,
   ): Promise<PromptAttachment | { readonly kind: 'context'; readonly contextRef: string } | undefined>
+  /** Attach files dropped from the VS Code Explorer, tabs or other workbench lists. */
+  attachDroppedResources(
+    uris: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<DroppedAttachments | undefined>
   rememberOpenFile(candidateId: string): void
   openLink(href: string): Promise<void>
   showInFolder(href: string): Promise<void>

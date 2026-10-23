@@ -55,6 +55,9 @@ const SESSION_EXPORT_TIMEOUT_MS = 180_000
 // Give the user time to choose or cancel while retaining a bounded lifetime.
 const NATIVE_DIALOG_TIMEOUT_MS = 600_000
 const PLUGIN_INSTALL_TIMEOUT_MS = 600_000
+// A drop can name up to 20 files; a remote `workspace.fs` read of each one is
+// slower than the ordinary request budget while still being a user action.
+const DROPPED_FILES_TIMEOUT_MS = 120_000
 
 /** Per-type host budgets; any request not listed keeps the ordinary timeout. */
 const EXTENDED_TIMEOUT_MS: Readonly<Record<string, number>> = {
@@ -64,6 +67,7 @@ const EXTENDED_TIMEOUT_MS: Readonly<Record<string, number>> = {
   'connection.configure': 120_000,
   'workspace.addFolder': NATIVE_DIALOG_TIMEOUT_MS,
   'attachment.pick': NATIVE_DIALOG_TIMEOUT_MS,
+  'attachment.drop.attach': DROPPED_FILES_TIMEOUT_MS,
   'provider.secret.configure': NATIVE_DIALOG_TIMEOUT_MS,
   'plugin.credential.configure': NATIVE_DIALOG_TIMEOUT_MS,
   'plugin.bundle.install': PLUGIN_INSTALL_TIMEOUT_MS,

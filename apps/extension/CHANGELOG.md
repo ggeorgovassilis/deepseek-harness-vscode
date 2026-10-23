@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- 可将资源管理器、编辑器标签和其他工作台列表中的文件拖入聊天输入框直接附加；按住 Shift 拖放（VS Code 的既有手势），仅接受当前工作区内的普通文件，扩展宿主读取内容后返回附件句柄，界面不显示也不回传文件路径。
+- Attaches files dragged into the composer from the Explorer, editor tabs and other workbench lists. Hold Shift while dropping (VS Code's existing gesture); only regular files inside the current workspace are accepted, the Extension Host reads the content and returns an attachment handle, and no path is shown or echoed back.
+
 ## 0.3.8
 
 - 修复空 VS Code 窗口安装编辑器配套时因保存工作区设置失败而立即终止的问题；未打开文件夹时保存到用户设置，安装、关闭与只读控制均可使用。

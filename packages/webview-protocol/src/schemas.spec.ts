@@ -949,6 +949,34 @@ describe('Schedule feature protocol', () => {
   })
 })
 
+describe('dropped resource attachment protocol', () => {
+  const request = (payload: unknown): unknown => ({
+    type: 'attachment.drop.attach',
+    requestId: 'drop-1',
+    payload,
+  })
+
+  it('accepts bounded absolute resource URIs from a workbench drag', () => {
+    expect(
+      webviewRequestSchema.safeParse(
+        request({ uris: ['file:///fixture/note.txt', 'vscode-remote://fixture-host/notes/a.md'] }),
+      ).success,
+    ).toBe(true)
+  })
+
+  it.each([
+    { uris: [] },
+    { uris: ['notes/note.txt'] },
+    // A drive-letter path is not a resource URI; only the Host may turn a
+    // workspace-relative value into one.
+    { uris: ['C:\\fixture\\note.txt'] },
+    { uris: ['file:///fixture/note.txt'], extra: true },
+    { uris: Array.from({ length: 21 }, (_, index) => `file:///fixture/${index}.txt`) },
+  ])('refuses a drop payload that is not a bounded absolute URI list (%j)', (payload) => {
+    expect(webviewRequestSchema.safeParse(request(payload)).success).toBe(false)
+  })
+})
+
 describe('message feedback Webview protocol', () => {
   it('accepts the upstream feedback category on submit and note updates', () => {
     for (const type of ['feedback.toggle', 'feedback.note'] as const) {
