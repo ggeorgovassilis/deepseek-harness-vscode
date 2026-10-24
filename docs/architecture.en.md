@@ -173,10 +173,10 @@ The Host is the single trust boundary. The Webview is an untrusted rendering sur
 
 Each decision below is the means by which the goals above are achieved.
 
-- **Web Host API as the only channel** *(goal 5)* — session, tool and approval state must be machine-readable; TUI/ANSI and model text are not contracts, so the client never parses them.
-- **Discovery before start** *(goal 3)* — preserves the user's existing process; only an instance this extension started may be stopped, and only by the handle it holds.
-- **Versioned adapter** *(goal 2)* — upstream changes are absorbed inside version boundaries so Domain, Application and Webview never depend on upstream types.
-- **Editor companion as a DSH bundle, not a separate process** *(goal 5)* — the Agent's tools must live inside DSH's runtime; a bundle rides DSH's existing authenticated Remote connection and adds no port.
-- **Timeline as a shared pure reduction, not presentation** *(goal 1)* — the timeline reduces the stream into immutable node snapshots that are themselves the transcript-window wire DTOs, so the protocol and the Host legitimately share one data model while React/UI stays on the Webview side.
-- **Stateless, bounded Webview** *(goals 1, 4)* — the Webview is untrusted and disposable; authoritative state and secrets live in the Host, and resident budgets plus view credits keep any surface bounded, so the Webview can be rebuilt or reconnected without loss.
-- **Secrets in the Host** *(goal 1)* — the Webview never handles provider secrets, so no secret can leak through rendering or diagnostics.
+- **Web Host API as the only channel** _(goal 5)_ — session, tool and approval state must be machine-readable; TUI/ANSI and model text are not contracts, so the client never parses them.
+- **Discovery before start** _(goal 3)_ — preserves the user's existing process; only an instance this extension started may be stopped, and only by the handle it holds.
+- **Versioned adapter** _(goal 2)_ — upstream changes are absorbed inside version boundaries so Domain, Application and Webview never depend on upstream types.
+- **Editor companion as a DSH bundle, not a separate process** _(goal 5)_ — the Agent's tools must live inside DSH's runtime; a bundle rides DSH's existing authenticated Remote connection and adds no port.
+- **Timeline as a shared pure reduction, not presentation** _(goal 1)_ — the timeline reduces the stream into immutable node snapshots that are themselves the transcript-window wire DTOs, so the protocol and the Host legitimately share one data model while React/UI stays on the Webview side.
+- **Stateless, bounded Webview** _(goals 1, 4)_ — the Webview is untrusted and disposable; authoritative state and secrets live in the Host, and resident budgets plus view credits keep any surface bounded, so the Webview can be rebuilt or reconnected without loss.
+- **Secrets in the Host** _(goal 1)_ — the Webview never handles provider secrets, so no secret can leak through rendering or diagnostics.
