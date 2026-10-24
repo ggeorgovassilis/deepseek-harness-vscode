@@ -56,6 +56,12 @@
 button.dsh-stats-pill {
   cursor: pointer;
 }
+.dsh-stats-pill > .dsh-stats-pill__suffix {
+  flex: none;
+}
+.dsh-stats-pill > .dsh-stats-pill__suffix:empty {
+  display: none;
+}
 button.dsh-stats-pill:hover,
 button.dsh-stats-pill[aria-expanded='true'] {
   color: var(--dsh-text);
@@ -100,6 +106,38 @@ button.dsh-stats-pill[aria-expanded='true'] {
   margin: 0;
   text-align: end;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.dsh-stats-billing {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--dsh-border-color);
+}
+.dsh-stats-billing > strong {
+  overflow-wrap: anywhere;
+}
+.dsh-billing-cost-details {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+.dsh-stats-dialog .dsh-billing-cost-breakdown > div {
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  gap: 4px 12px;
+}
+.dsh-billing-cost-issues ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dsh-billing-cost-issues {
+  margin-top: 16px;
+}
+.dsh-billing-cost-issues ul {
+  margin-top: 8px;
+}
+.dsh-billing-cost-issues p {
+  margin: 4px 0 8px;
+  color: var(--dsh-muted);
 }
 .dsh-stats-dialog:focus-visible {
   outline: 2px solid var(--dsh-focus);

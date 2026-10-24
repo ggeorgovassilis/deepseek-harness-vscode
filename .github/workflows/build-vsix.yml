@@ -55,8 +55,8 @@ jobs:
           path: |
             node_modules/.cache/vitest
             node_modules/.cache/node-compile
-          key: tests-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'vitest*.ts') }}-${{ github.sha }}
-          restore-keys: tests-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'vitest*.ts') }}-
+          key: tests-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'vitest*.ts', 'config/vitest*.ts') }}-${{ github.sha }}
+          restore-keys: tests-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'vitest*.ts', 'config/vitest*.ts') }}-
       - name: Run checks
         run: pnpm check
 
@@ -133,6 +133,9 @@ jobs:
 
   publish:
     name: Publish to Visual Studio Marketplace
+    concurrency:
+      group: marketplace-publish
+      cancel-in-progress: false
     if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish_marketplace == true) }}
     needs: package
     runs-on: ubuntu-24.04

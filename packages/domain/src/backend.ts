@@ -1,4 +1,5 @@
 import type { WorkspaceChangeSource } from './changes.js'
+import type { BillingUsageRepository } from './billing.js'
 import type { ModsBandRepository } from './mods-band.js'
 import type { InspectorDevtoolsRepository } from './inspector.js'
 import type { BackendEvent, GoalView, JobFollowFrame, JobView, SubagentCatalog } from './events.js'
@@ -52,9 +53,23 @@ export interface AsyncEventSource<T> {
   close(): Promise<void>
   /** Local settlement from a request made by this client, when the wire omits its own echo. */
   publish?(event: T): void
+  /**
+   * Start (or confirm) the durable follow stream for one session. Optional:
+   * single-stream backends carry every session on one connection and need no
+   * per-session subscription management.
+   */
+  watchSession?(sessionId: string): void
+  /**
+   * Stop following one session. `keepJobRows` preserves the session's Job row
+   * stream so running background jobs keep publishing progress while the
+   * conversation follow stream is released. Idempotent for unknown sessions.
+   */
+  unwatchSession?(sessionId: string, options?: { readonly keepJobRows?: boolean }): void
 }
 
 export interface SessionRepository {
+  /** Optional, exact-version, prompt-free accounting. Independent of presentation history. */
+  readonly readBillingPage?: BillingUsageRepository['readBillingPage']
   /** Runtime-owned permission choices, available before a session exists. */
   listPermissionPresets?(signal?: AbortSignal): Promise<readonly string[]>
   readPermissionCatalog?(signal?: AbortSignal): Promise<PermissionPresetCatalog>

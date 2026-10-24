@@ -1,4 +1,7 @@
 import * as vscode from 'vscode'
+import { BillingFeatureHost } from './billing/billing-feature-handler.js'
+import { ModelsDevPriceSource } from './billing/models-dev-price-source.js'
+import { FrankfurterExchangeSource } from './billing/frankfurter-exchange-source.js'
 import type { DshRuntimeUpdateProgress, EditorContextOwner, SessionSummary } from '@dsh-vscode/domain'
 import {
   featureHostEnvelopeSchema,
@@ -33,6 +36,7 @@ import { createHostEventPipeline, isBulkEvent } from './composition/host-event-p
 import { createChangeCheckpointTaskAssembly } from './composition/change-checkpoint-task-assembly.js'
 import { createJobFollowHost } from './composition/job-follow-host.js'
 import { createBackendAttach } from './composition/backend-attach.js'
+import { createSessionWatchController } from './backend/session-watch-coordinator.js'
 import { createFeatureContext } from './composition/feature-context.js'
 import { createFeatureRequestHandler } from './composition/feature-request-handler.js'
 import { createRequestGateway } from './composition/request-handler.js'
@@ -276,6 +280,7 @@ export function createCompositionRoot(context: vscode.ExtensionContext): Composi
     diagnostics,
     requireCurrentWorkspaceSession,
   })
+  const sessionWatch = createSessionWatchController()
   const { attach, disposeAccountLifecycleHost, getAccountLifecycleHost, detachSessionAdapters } =
     createBackendAttach({
       backendService,
@@ -287,6 +292,7 @@ export function createCompositionRoot(context: vscode.ExtensionContext): Composi
       invalidateCurrentWorkspaceSessionDetails,
       changeTracker,
       taskRegistry,
+      sessionWatch,
       editorContextProvider,
       currentWorkspaceFolderId,
       taskFocus,
@@ -325,6 +331,17 @@ export function createCompositionRoot(context: vscode.ExtensionContext): Composi
     currentWorkspaceFolderId,
   })
   const { handleFeatureRequest } = createFeatureRequestHandler({
+    billing: new BillingFeatureHost(
+      {
+        storage: context.globalState,
+        backendService,
+        requireSession: requireCurrentWorkspaceSession,
+        isTrusted: () => vscode.workspace.isTrusted,
+        changed: () => postFeatureEvent('billing.settings.changed', {}),
+      },
+      new ModelsDevPriceSource(),
+      new FrankfurterExchangeSource(globalThis.fetch, Date.now, context.globalState),
+    ),
     editorCompanion: () => commands.editorCompanion,
     getAccountLifecycleHost,
     backendService,
@@ -370,6 +387,7 @@ export function createCompositionRoot(context: vscode.ExtensionContext): Composi
     runtimeUseCases,
     runtimeLocator,
     coordinator,
+    sessionWatch,
     extensionVersion,
     configuration,
     backendService,
@@ -457,6 +475,7 @@ export function createCompositionRoot(context: vscode.ExtensionContext): Composi
     dispose: () => {
       eventLoopLag.dispose()
       transcript.dispose()
+      sessionWatch.dispose()
       disposeHostEventPipeline()
       return commands.dispose()
     },

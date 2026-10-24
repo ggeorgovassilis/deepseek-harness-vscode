@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "../../config/tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
     "jsx": "react-jsx",
@@ -11,6 +11,9 @@
     "src/**/*.tsx",
     "vite.config.ts",
     "../extension/src/view/transcript-window.ts",
-    "../extension/src/view/bounded-event-queue.ts"
+    "../extension/src/view/bounded-event-queue.ts",
+    "../extension/src/view/public-value.ts",
+    "../extension/src/view/editor-companion-public.ts",
+    "../extension/src/backend/path-safety.ts"
   ]
 }
