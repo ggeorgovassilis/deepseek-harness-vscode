@@ -88,6 +88,39 @@ markdownRenderer.use(texmath, {
   },
 })
 
+// Models sometimes wrap a complete Markdown link in a code span. Recover that
+// narrow form through the normal parser and Host link policy; fenced examples
+// and code expressions keep their literal content.
+markdownRenderer.core.ruler.after('inline', 'code_span_links', (state): void => {
+  for (const block of state.tokens) {
+    const children = block.children
+    if (children === null) continue
+    let insideLink = false
+    for (let index = 0; index < children.length; index += 1) {
+      const token = children[index]
+      if (token?.type === 'link_open') insideLink = true
+      if (token?.type === 'link_close') insideLink = false
+      if (
+        token?.type !== 'code_inline' ||
+        insideLink ||
+        !token.content.startsWith('[') ||
+        !token.content.endsWith(')')
+      )
+        continue
+      const parts = markdownRenderer.parseInline(token.content, {}).at(0)?.children
+      if (parts?.length !== 3) continue
+      const [open, label, close] = parts
+      if (open?.type !== 'link_open' || label?.type !== 'text' || close?.type !== 'link_close') continue
+      open.level = token.level
+      close.level = token.level
+      token.level += 1
+      token.content = label.content
+      children.splice(index, 1, open, token, close)
+      index += 2
+    }
+  }
+})
+
 export interface MarkdownContentProps {
   readonly markdown: string
   /** Streaming messages render completed blocks separately from the tail. */
@@ -202,9 +235,9 @@ export const MarkdownContent = memo(function MarkdownContent({
     const mentions: MountedFileMention[] = []
     if (onOpenLink !== undefined && producedFiles.length > 0) {
       for (const code of Array.from(container.querySelectorAll<HTMLElement>('code'))) {
-        // Fenced blocks are copied as a unit and must never turn individual
-        // source-code tokens into file-open actions.
-        if (code.closest('pre') !== null) continue
+        // Fenced examples stay literal; an explicit link already owns its
+        // target and must not get a nested button with a different path.
+        if (code.closest('pre, a') !== null) continue
         const value = code.textContent ?? ''
         const path = resolveProducedPath(producedFiles, value)
         if (path === undefined) continue
@@ -427,11 +460,17 @@ function highlightRegionHtml(html: string, streaming: boolean, memory: Highlight
   const codeBlocks = Array.from(parsed.body.querySelectorAll<HTMLElement>('pre > code[class*="language-"]'))
   if (codeBlocks.length === 0) return html
   let changed = false
-  for (const code of codeBlocks) {
+  for (const [index, code] of codeBlocks.entries()) {
     const languageClass = Array.from(code.classList).find((value) => value.startsWith('language-'))
     const language = languageClass === undefined ? undefined : resolveBundledLanguage(languageClass.slice(9))
     if (language === undefined) continue
-    const highlighted = highlightedBlockHtml(language, code.textContent ?? '', streaming, memory)
+    const highlighted = highlightedBlockHtml(
+      language,
+      code.textContent ?? '',
+      streaming,
+      memory,
+      streaming ? undefined : `completed:${index}:${language}`,
+    )
     if (highlighted === undefined) continue
     const template = parsed.createElement('template')
     template.innerHTML = highlighted
@@ -449,6 +488,7 @@ function highlightedBlockHtml(
   code: string,
   streaming: boolean,
   memory: HighlightMemory,
+  slot = blockSlot(language, code),
 ): string | undefined {
   // Shiki tokenizes from left to right, so a prefix of the block always yields
   // the same tokens as the finished block. Only the text behind the last
@@ -457,8 +497,7 @@ function highlightedBlockHtml(
   const boundary = streaming ? code.lastIndexOf('\n') : code.length - 1
   if (boundary < 0) return undefined
   const stable = code.slice(0, boundary + 1)
-  const slot = blockSlot(language, code)
-  const entry = memory.get(slot)
+  const entry = memory.get(slot) ?? memory.get(blockSlot(language, code))
   // A retried attempt can replace the text with a shorter one, which makes the
   // remembered progress meaningless until a new highlight lands.
   const rewritten = entry?.shown !== undefined && !stable.startsWith(entry.shown.code)
@@ -472,6 +511,7 @@ function highlightedBlockHtml(
   // on screen and stays plaintext past that prefix.
   if (
     typeof exact !== 'string' &&
+    onScreen?.code !== stable &&
     (!streaming || requested === 0 || stable.length - requested >= growthStep(stable.length))
   ) {
     requestCodeHighlight(language, stable)

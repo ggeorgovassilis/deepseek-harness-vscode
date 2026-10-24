@@ -1,5 +1,5 @@
 {
-  "extends": "../tsconfig.base.json",
+  "extends": "../config/tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
     "noEmit": true,
@@ -24,6 +24,7 @@
     "../apps/extension/src/backend/path-safety.ts",
     "../apps/extension/src/backend/skill-documents.ts",
     "../apps/extension/src/backend/process-supervisor.ts",
+    "../apps/extension/src/backend/session-watch-coordinator.ts",
     "../apps/extension/src/backend/endpoint-network.ts",
     "../apps/extension/src/backend/external-connection-access.ts",
     "../apps/extension/src/backend/credential-scope.ts",
@@ -42,6 +43,12 @@
     "../apps/extension/src/backend/adapter-options.ts",
     "../apps/extension/src/backend/version-adapters.ts",
     "../apps/extension/src/backend/windows-shim.ts",
+    "../apps/extension/src/backend/runtime-paths.ts",
+    "../apps/extension/src/composition/runtime.ts",
+    "../apps/extension/src/editor/editor-companion-management.ts",
+    "../apps/extension/src/editor/companion-prerequisites.ts",
+    "../apps/extension/src/editor/companion-archive.ts",
+    "../apps/extension/src/editor/test-fixtures/companion-vscode.ts",
     "../apps/extension/src/changes/change-set-tracker.ts",
     "../apps/extension/src/view/public-value.ts",
     "../apps/extension/src/view/editor-companion-public.ts",

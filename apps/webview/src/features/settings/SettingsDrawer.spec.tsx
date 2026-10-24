@@ -719,7 +719,7 @@ describe('SettingsDrawer', () => {
     expect(onInstallDshVersion).not.toHaveBeenCalled()
   })
 
-  it('shows a determinate lifecycle stage while installation is pending', async () => {
+  it('restores the running installation progress when settings opens', async () => {
     const dshUpdate: DshUpdateSnapshot = {
       status: 'ready',
       currentVersion: '0.1.0-rc.6',
@@ -730,31 +730,60 @@ describe('SettingsDrawer', () => {
       updateAvailable: true,
       checkedAt: '2026-08-21T00:00:00.000Z',
     }
-    let resolveInstall: ((snapshot: DshUpdateSnapshot) => void) | undefined
-    const onInstallDshVersion = vi.fn(
-      () =>
-        new Promise<DshUpdateSnapshot>((resolve) => {
-          resolveInstall = resolve
-        }),
-    )
+    const onInstallDshVersion = vi.fn()
+    const onShowDshUpdateOutput = vi.fn().mockResolvedValue(undefined)
     renderDrawer({
       dshUpdate,
-      dshUpdateProgress: { phase: 'downloading', version: '0.1.0-rc.8' },
+      dshUpdateProgress: { phase: 'downloading', version: '0.1.0-rc.8', startedAt: Date.now() - 20_000 },
+      onShowDshUpdateOutput,
       onCheckDshUpdates: vi.fn().mockResolvedValue(dshUpdate),
       onInstallDshVersion,
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Download and install' }))
     const progress = await screen.findByRole('progressbar', { name: 'DSH update progress' })
     expect(progress.getAttribute('aria-valuenow')).toBe('2')
     expect(screen.getByText('Stage 2/4')).toBeDefined()
 
-    resolveInstall?.(dshUpdate)
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Download and install' }).hasAttribute('disabled')).toBe(
-        false,
-      ),
+    expect(screen.getByText(/Elapsed: 20s/u)).toBeDefined()
+    expect(screen.getByText('npm is still running; waiting for more output…')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Installing…' }).hasAttribute('disabled')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Show installation output' }))
+    expect(onShowDshUpdateOutput).toHaveBeenCalledOnce()
+    expect(onInstallDshVersion).not.toHaveBeenCalled()
+  })
+
+  it('replaces installation progress with the verified result and refreshed global version', async () => {
+    const before: DshUpdateSnapshot = {
+      status: 'ready',
+      currentVersion: '0.2.1-rc.2',
+      globalVersion: '0.2.1-rc.2',
+      latestVersion: '0.2.1-rc.3',
+      availableVersions: ['0.2.1-rc.3', '0.2.1-rc.2'],
+      updateAvailable: true,
+      checkedAt: '2026-10-24T00:00:00.000Z',
+    }
+    const after = { ...before, globalVersion: '0.2.1-rc.3', updateAvailable: false, restartRequired: true }
+    const handlers = {
+      onCheckDshUpdates: vi.fn().mockResolvedValue(before),
+      onInstallDshVersion: vi.fn(),
+    }
+    const view = renderDrawer({
+      ...handlers,
+      dshUpdate: before,
+      dshUpdateProgress: { phase: 'downloading', version: '0.2.1-rc.3' },
+    })
+    expect(await screen.findByRole('progressbar', { name: 'DSH update progress' })).toBeDefined()
+    view.rerender(
+      drawerElement({
+        ...handlers,
+        dshUpdate: after,
+        dshUpdateProgress: { phase: 'completed', version: '0.2.1-rc.3', snapshot: after },
+      }),
     )
+    expect(await screen.findByText('DSH 0.2.1-rc.3 installed and verified.')).toBeDefined()
+    expect(screen.queryByRole('progressbar', { name: 'DSH update progress' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Already installed' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.queryByText('DSH 0.2.1-rc.3 is available.')).toBeNull()
   })
 
   it('shows the Host-side npm failure reason instead of hiding it behind a generic warning', async () => {
@@ -772,6 +801,32 @@ describe('SettingsDrawer', () => {
     })
 
     expect(await screen.findByText(/Could not run npm in the extension environment/i)).toBeDefined()
+  })
+
+  it('offers a managed restart after verified installation and reports a restart failure', async () => {
+    const dshUpdate: DshUpdateSnapshot = {
+      status: 'ready',
+      currentVersion: '0.2.1-rc.2',
+      globalVersion: '0.2.1-rc.3',
+      latestVersion: '0.2.1-rc.3',
+      availableVersions: ['0.2.1-rc.3'],
+      updateAvailable: false,
+      checkedAt: '2026-10-24T00:00:00.000Z',
+      restartRequired: true,
+      canRestart: true,
+    }
+    const onRestartDsh = vi.fn().mockRejectedValue(new Error('restart failed'))
+    renderDrawer({
+      dshUpdate,
+      onCheckDshUpdates: vi.fn().mockResolvedValue(dshUpdate),
+      onInstallDshVersion: vi.fn(),
+      onRestartDsh,
+    })
+    fireEvent.click(await screen.findByRole('button', { name: 'Restart DSH' }))
+    await waitFor(() =>
+      expect(screen.getByText('Could not restart DSH. Check the connection status and retry.')).toBeDefined(),
+    )
+    expect(onRestartDsh).toHaveBeenCalledOnce()
   })
 
   it('opens the host-owned settings document when the host advertises one', async () => {

@@ -2,7 +2,65 @@
 
 ## Unreleased
 
+## 0.4.0
+
+- 新增可选的会话费用估算，支持官方参考价匹配、手动选择模型、自定义单价，以及带缓存的人民币／美元换算。
+- Adds optional session cost estimates with official price matching, searchable reference models, custom rates and cached CNY/USD conversion.
+- 完善 DSH 与编辑器配套插件的安装、更新和恢复流程，显示实时输出与实际结果，处理网络、代理、取消和缓存版本恢复。
+- Improves DSH and editor companion installation, updates and recovery with live output, verified results, network and proxy handling, cancellation and cached-version recovery.
+- 修复加载大历史会话时反复断线的问题，减少快照、长回复、代码高亮和统计中的重复计算。
+- Fixes repeated connection drops when loading large histories and reduces repeated snapshot, transcript, highlighting and statistics work.
+- 会话改为按需订阅，多个面板共享连接；继续跟踪后台任务和待处理交互，空闲会话自动释放订阅。
+- Follows sessions on demand, shares subscriptions across panels, keeps background tasks and pending interactions updated, and releases idle subscriptions.
+- 修正上下文占比、链接点击、提问选择与快捷键、工具错误折叠，以及重复的权限和模式切换提示。
+- Fixes context proportions, link handling, question selection and keyboard submission, collapsible tool errors, and repeated permission and mode-change messages.
+
+### Model billing / 模型计费
+
+- 分时规则合并同一时段的上下限，并保留“且／或／排除”的含义。中文显示北京时间，英文显示 UTC；跨日时同步换算星期，价格有效期的显示和编辑也使用对应时区，保存与计算仍基于原始时间。
+- Time rules combine bounds into complete intervals and preserve conjunction, alternatives and exclusions. Chinese displays Beijing time and English displays UTC, including shifted weekdays and price-validity editing, while storage and calculations retain the original instants.
+- 在模型设置中按需开启。优先匹配官方参考价，支持官方账号别名、大小写及完整模型标识；不确定的匹配提供候选，也可搜索完整目录手动选择。用户选择和自定义单价优先保留。
+- Enable estimates in Models settings. Official references are preferred, including account aliases, case variants and qualified model IDs. Ambiguous matches offer candidates and full-catalog search; explicit mappings and custom prices take priority.
+- 可展开查看单价、缓存及时间、上下文、服务等级等计价条件。费用详情保留输入、输出和缓存分项，标明未计价原因；长历史达到读取预算时保留部分结果，读取失败可重试。
+- Expand rates and cache, time, context and service-tier conditions. Cost details show input, output and cache subtotals with reasons for unpriced usage. Large histories retain partial estimates at the read budget, and failed reads offer retry.
+- 中文显示人民币，英文显示美元，保留原始单价与费用。成功取得的汇率保存到本地；刷新失败时沿用上次报价和日期，无缓存时才按 1 USD = 6.8 CNY 换算并标注。
+- Chinese displays CNY and English displays USD while retaining original rates and costs. Successful exchange quotes persist across restarts; failed refreshes reuse the last dated quote, with a labeled 1 USD = 6.8 CNY fallback only when no quote is available.
+- 金额最多显示四位小数，极小金额显示阈值。窄面板在 Token 统计旁显示金额并在统计详情中展示分项，宽面板使用独立费用区块。金额和详情共享缓存，用量、设置或连接变化后刷新，失败保留上次结果。
+- Amounts use up to four decimals and a threshold for tiny values. Narrow panels show cost beside token statistics with a breakdown in details; wider panels use a separate cost pill. Shared estimates refresh on usage, settings or connection changes and retain the last result on failure.
+
+### Installation, updates and recovery / 安装、更新与恢复
+
+- DSH 安装和更新显示阶段、耗时及原生实时输出，改进网络重试、超时清理、代理和证书错误反馈，沿用 npm 配置并在缺少环境代理时使用 VS Code 代理。长输出和 npm 警告不会单独判定安装失败；以进程退出和安装后版本验证确认结果，完成通知也可结束等待，重连后刷新当前版本，防止旧检查覆盖新结果。
+- DSH installation shows stages, elapsed time and live native output, with improved retries, timeout cleanup, proxy and certificate feedback. It respects npm configuration and uses the VS Code proxy when no environment proxy is present. Large logs and npm warnings alone do not fail installation. Process exit and installed-version verification determine the result; completion events settle pending requests, and reconnects refresh the running version without stale checks overwriting it.
+- 修复 Windows 独立版 pnpm 误判，跳过损坏的入口，支持 Corepack 补全、npm 回退和取消，重新检测成功后清除旧错误；受管理 DSH 优先使用检测通过的 pnpm，并处理子进程 PATH 大小写冲突。
+- Fixes standalone pnpm detection on Windows, skips broken launchers, supports Corepack repair, npm fallback and cancellation, and clears stale dependency errors after rechecking. Managed DSH prefers the verified launcher and avoids conflicting PATH casing.
+- 配套插件安装返回成功、失败、取消或结果未确认的实际状态，完成后刷新状态，推迟重启时保留提示。修复同路径 already-installed 导致反复回滚的问题，重装使用校验后的固定备用包路径，不先卸载；安装和恢复分别保留请求 ID、取消操作和启停状态，恢复失败时停止共享，迟到回显不覆盖当前操作。
+- Companion installation reports success, failure, cancellation or an unconfirmed result, refreshes status, and retains deferred restart actions. Repair uses a verified immutable alternate package path for already-installed responses without uninstalling first. Install and recovery retain separate request identities, cancellation and enabled state; failed recovery stops sharing, and late responses cannot overwrite the current operation.
+- 恢复重连不会重复触发失败的自动更新；手动恢复缓存版本会暂停自动更新，仍可主动更新。缓存按包内容去重，列表优先显示较新的包并区分同版本构建，保留已有安装路径与回滚包。依赖正常时隐藏多余说明，故障排查默认折叠。
+- Recovery reconnects do not repeat a failed automatic update, and manually restoring a cached version pauses automatic updates until an explicit update. Cached packages deduplicate by content, list newer builds first and distinguish builds sharing a version while preserving installation and rollback paths. Routine dependency guidance stays hidden when ready; troubleshooting is collapsed by default.
+
+### Sessions and performance / 会话与性能
+
+- 保留可见、运行中和等待用户应答的会话订阅，空闲且不可见后延迟 30 秒取消，重开时加载历史。多个面板共享订阅，后台任务保留进度流并在重连后恢复；已结束子会话不再仅因父会话打开而回放。
+- Visible, running and actionable sessions remain followed. Hidden idle sessions release after 30 seconds and reload history when reopened. Panels share subscriptions; background jobs retain progress streams and recover after reconnecting. Completed child sessions do not replay merely because their parent is open.
+- 大快照按身份集合去重，解码、投影与控制器回放分批让出事件循环，避免阻塞心跳；取消和重启会释放待投递批次。长回复增量计算大小，历史文本按组组装，复用未变化的高亮、工具与正文数组，保留事件顺序、脱敏、协议校验及及时统计。
+- Large snapshots deduplicate through identity sets, and decoding, projection and controller replay yield in batches to keep heartbeats responsive. Cancellation and restart release pending batches. Long replies use incremental size accounting, history text assembles per group, and unchanged highlights, tools and content arrays are reused while preserving event order, redaction, protocol checks and current statistics.
+
+### Chat interactions / 会话交互
+
+- 上下文条以完整窗口为 100%，分项只占已用比例，剩余容量保留底色；总容量未知时仅显示数值。
+- Context bars use the full window as 100%, confine categories to the occupied share and leave remaining capacity unfilled. Unknown capacity keeps numeric details without a percentage bar.
+- 行内代码包裹的完整 Markdown 链接可点击，文件引用保留显式链接的目标，避免重复打开。
+- Complete Markdown links wrapped in inline code remain clickable. File references preserve explicit link targets and avoid opening two locations from one click.
+- 自定义回答增加选择标记，聚焦输入框即选中；Ctrl+Enter / ⌘Enter 提交整组答案，普通回车换行，输入法选字和重复按键不误提交。
+- Custom answers have selection controls and activate on focus. Ctrl+Enter / ⌘Enter submits the complete answer batch; Enter adds a line, and composition or repeated key events do not submit.
+- 工具失败在所属工具组的折叠按钮和箭头标红，错误正文随工具详情收起。权限变更产生的内部通知不再作为可编辑引导输入；权限和计划切换成功提示不进入聊天，重开和重放也不会重复插入，真实失败仍保留。
+- Failed calls mark their tool-group disclosure and arrow in red, with error text inside collapsible tool details. Internal permission context is excluded from editable steering input. Successful permission and plan changes stay out of chat and are not reinserted on reopen or replay; actual failures remain visible.
+
 ## 0.3.9
+
+- V4 会话历史快照分批校验和转换，定期让出事件循环并避免重复校验，降低大量历史加载时因心跳响应延迟而断线的风险；诊断日志增加脱敏断线原因与 WebSocket 关闭码。
+- Decodes V4 session history snapshots incrementally, yielding to the event loop and avoiding duplicate validation to reduce heartbeat disconnects while loading large histories. Diagnostics include sanitized connection-loss reasons and WebSocket close codes.
 
 - 编辑器配套包升级到 `0.2.2`，采用跨版本兼容声明与可选 Host peer；通过服务和协议协商决定能力，不以 DSH 版本枚举限制安装，也不额外安装一套核心服务。保留构建指纹更新与原有协议。
 - Updates the editor companion to `0.2.2` with broad runtime compatibility and optional Host peers. Services and protocol negotiation determine available capabilities without a DSH version allowlist or an extra core-service installation. Build fingerprint updates and the existing protocol remain available.

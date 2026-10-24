@@ -1,4 +1,7 @@
 import * as vscode from 'vscode'
+import { BillingFeatureHost } from './billing/billing-feature-handler.js'
+import { ModelsDevPriceSource } from './billing/models-dev-price-source.js'
+import { FrankfurterExchangeSource } from './billing/frankfurter-exchange-source.js'
 import type { DshRuntimeUpdateProgress, EditorContextOwner, SessionSummary } from '@dsh-vscode/domain'
 import {
   featureHostEnvelopeSchema,
@@ -17,6 +20,7 @@ export {
 export { createManagedEndpointLoginHandler } from './composition/connection-assembly.js'
 import { PluginInstallRequestCoordinator } from './plugins/plugin-bundle-feature-handler.js'
 import { diagnosticLevel, RedactedDiagnostics } from './backend/diagnostics.js'
+import { EventLoopLagMonitor } from './backend/event-loop-lag.js'
 import { VsCodeConfigurationSource } from './config/configuration-source.js'
 import { OUTPUT_CHANNEL_NAME } from './constants.js'
 import { workspaceFolderId } from './editor/workspace-path-guard.js'
@@ -32,6 +36,7 @@ import { createHostEventPipeline, isBulkEvent } from './composition/host-event-p
 import { createChangeCheckpointTaskAssembly } from './composition/change-checkpoint-task-assembly.js'
 import { createJobFollowHost } from './composition/job-follow-host.js'
 import { createBackendAttach } from './composition/backend-attach.js'
+import { createSessionWatchController } from './backend/session-watch-coordinator.js'
 import { createFeatureContext } from './composition/feature-context.js'
 import { createFeatureRequestHandler } from './composition/feature-request-handler.js'
 import { createRequestGateway } from './composition/request-handler.js'
@@ -60,6 +65,8 @@ export function createCompositionRoot(context: vscode.ExtensionContext): Composi
   const diagnostics = new RedactedDiagnostics(channel, () =>
     diagnosticLevel(vscode.workspace.getConfiguration('dsh.developer').get<string>('logLevel')),
   )
+  const eventLoopLag = new EventLoopLagMonitor()
+  eventLoopLag.start()
   const currentWorkspaceFolders = (): readonly vscode.WorkspaceFolder[] => {
     const folders = vscode.workspace.workspaceFolders
     if (folders !== undefined && folders.length > 0) return folders
@@ -273,16 +280,19 @@ export function createCompositionRoot(context: vscode.ExtensionContext): Composi
     diagnostics,
     requireCurrentWorkspaceSession,
   })
+  const sessionWatch = createSessionWatchController()
   const { attach, disposeAccountLifecycleHost, getAccountLifecycleHost, detachSessionAdapters } =
     createBackendAttach({
       backendService,
       sessionUseCases,
       extensionVersion,
       diagnostics,
+      eventLoopLag,
       stopAllJobFollows,
       invalidateCurrentWorkspaceSessionDetails,
       changeTracker,
       taskRegistry,
+      sessionWatch,
       editorContextProvider,
       currentWorkspaceFolderId,
       taskFocus,
@@ -321,6 +331,17 @@ export function createCompositionRoot(context: vscode.ExtensionContext): Composi
     currentWorkspaceFolderId,
   })
   const { handleFeatureRequest } = createFeatureRequestHandler({
+    billing: new BillingFeatureHost(
+      {
+        storage: context.globalState,
+        backendService,
+        requireSession: requireCurrentWorkspaceSession,
+        isTrusted: () => vscode.workspace.isTrusted,
+        changed: () => postFeatureEvent('billing.settings.changed', {}),
+      },
+      new ModelsDevPriceSource(),
+      new FrankfurterExchangeSource(globalThis.fetch, Date.now, context.globalState),
+    ),
     editorCompanion: () => commands.editorCompanion,
     getAccountLifecycleHost,
     backendService,
@@ -366,6 +387,7 @@ export function createCompositionRoot(context: vscode.ExtensionContext): Composi
     runtimeUseCases,
     runtimeLocator,
     coordinator,
+    sessionWatch,
     extensionVersion,
     configuration,
     backendService,
@@ -451,7 +473,9 @@ export function createCompositionRoot(context: vscode.ExtensionContext): Composi
   const root: CompositionRoot = {
     start: commands.start,
     dispose: () => {
+      eventLoopLag.dispose()
       transcript.dispose()
+      sessionWatch.dispose()
       disposeHostEventPipeline()
       return commands.dispose()
     },

@@ -23,6 +23,7 @@ import type {
 } from '@dsh-vscode/domain'
 import { cacheHitRate } from '@dsh-vscode/timeline'
 import { StatsLine } from './features/chat/StatsLine.js'
+import { BillingCost } from './features/billing/BillingCost.js'
 import { SessionDrawer } from './features/sessions/SessionDrawer.js'
 import { useScheduleSessionActions } from './app/useScheduleSessionActions.js'
 import { usePendingInteractions } from './app/usePendingInteractions.js'
@@ -718,6 +719,22 @@ const useAppControllerImpl = () => {
           cacheHit={cacheHitRate(composerUsage)}
           performanceUsage={performanceUsage}
           {...(sessionStats === undefined ? {} : { sessionStats })}
+          {...(activeSessionId === undefined
+            ? {}
+            : {
+                cost: (details: boolean, inline = false) => (
+                  <BillingCost
+                    details={details}
+                    labelOnly={inline}
+                    cacheScope={String(state.connectionEpoch)}
+                    key={`${state.connectionEpoch}:${activeSessionId}`}
+                    request={store.featureRequest}
+                    subscribe={store.subscribeFeature}
+                    sessionId={activeSessionId}
+                    usageKey={JSON.stringify(composerUsage ?? null)}
+                  />
+                ),
+              })}
         />
       ),
     [
@@ -728,6 +745,9 @@ const useAppControllerImpl = () => {
       state.timeline.nodeChangeBase,
       state.timeline.nodeChangeStart,
       state.timeline.nodes,
+      state.connectionEpoch,
+      store.featureRequest,
+      store.subscribeFeature,
     ],
   )
   const sessionControl = useMemo(
