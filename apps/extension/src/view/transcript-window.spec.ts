@@ -58,6 +58,21 @@ function fixture(
 afterEach(() => vi.useRealTimers())
 
 describe('Host transcript windows', () => {
+  it('keeps omitted-body versions stable across equal rebaselines but detects hidden same-length changes', () => {
+    const client = fixture()
+    try {
+      const prefix = 'x'.repeat(5_000_000)
+      const first = client.open([message(0, prefix + 'hidden A')])
+      const second = client.open([message(0, prefix + 'hidden A')])
+      expect(second.contentVersions).toEqual(first.contentVersions)
+      const changed = client.open([message(0, prefix + 'hidden B')])
+      expect(changed.nodes).toEqual(second.nodes)
+      expect(changed.contentVersions?.['m-0']).not.toBe(second.contentVersions?.['m-0'])
+      expect(changed.contentVersions?.['m-0']).toMatch(/^[a-f0-9]{64}$/)
+    } finally {
+      client.service.dispose()
+    }
+  })
   it('posts subsequent text and executed tool context before the preceding IPC receipt settles', async () => {
     vi.useFakeTimers()
     const sent: (TranscriptWindow | TranscriptPatch)[] = []
@@ -567,6 +582,36 @@ describe('Host transcript windows', () => {
     const delivered = sent.length
     await vi.advanceTimersByTimeAsync(4_000)
     expect(sent).toHaveLength(delivered)
+    service.dispose()
+  })
+
+  it('parks permanent delivery failure across streaming and recovery rereads until readiness changes', async () => {
+    const post = vi.fn().mockResolvedValue(false)
+    const invalidate = vi.fn()
+    const service = new TranscriptWindowService({
+      read: () => Promise.resolve({ events: [], hasMore: false }),
+      publicValue: (value) => value,
+      post,
+      invalidate,
+    })
+    const page = { events: [message(0)], hasMore: false }
+    service.installPage(sessionId, page, service.begin(sessionId))
+    service.accept({ type: 'turn.started', sessionId, turn: 1, sequence: 1 })
+    for (let index = 0; index < 12; index++) await Promise.resolve()
+    expect(post).toHaveBeenCalledTimes(4)
+    expect(invalidate).toHaveBeenCalledTimes(1)
+    service.installPage(sessionId, page, service.begin(sessionId))
+    for (let index = 2; index < 20; index++) {
+      service.accept({ type: 'message.delta', sessionId, messageId: 'live', delta: 'x', sequence: index })
+      await Promise.resolve()
+    }
+    expect(post).toHaveBeenCalledTimes(4)
+    expect(invalidate).toHaveBeenCalledTimes(1)
+    post.mockResolvedValue(true)
+    service.setVisible(false)
+    service.setVisible(true)
+    await Promise.resolve()
+    expect(post).toHaveBeenCalledTimes(5)
     service.dispose()
   })
 

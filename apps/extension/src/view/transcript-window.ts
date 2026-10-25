@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { TranscriptContentVersions } from './transcript-content-version.js'
 import {
   AppError,
   type BackendEvent,
@@ -81,12 +82,14 @@ interface WindowMetadataSource {
   readonly before: number | undefined
   readonly historical: boolean
   readonly omitted: string
+  readonly contentVersions: string
   readonly todos: readonly TodoView[] | undefined
   readonly todosOmitted: true | undefined
 }
 
 /** A presentation cache. DSH owns durable ordering, recovery and domain projections. */
 export class TranscriptWindowService {
+  private readonly contentVersions = new TranscriptContentVersions()
   private generation = 0
   private revision = 0
   private pending: PendingOpen | undefined
@@ -113,6 +116,7 @@ export class TranscriptWindowService {
     | undefined
   private invalidated = false
   private retryAttempt = 0
+  private deliverySuspended = false
   private deliveryEpoch = 0
   private readonly recentEvents = new Map<string, true>()
   private hostSequence = 0
@@ -146,7 +150,7 @@ export class TranscriptWindowService {
   public begin(sessionId: string, child = false): number {
     const generation = ++this.generation
     this.deliveryEpoch++
-    this.clearRetry()
+    // Reads and invalidations are not proof that the renderer recovered.
     this.published = undefined
     this.pending = { sessionId, generation, child, events: [], chars: 0, overflow: false }
     return generation
@@ -230,7 +234,6 @@ export class TranscriptWindowService {
     this.pendingAcks.clear()
     this.pendingChars = 0
     this.budgetBlocked = false
-    this.clearRetry()
     return this.snapshot()
   }
 
@@ -476,8 +479,14 @@ export class TranscriptWindowService {
   }
 
   public setVisible(visible: boolean): void {
+    const becameVisible = visible && !this.visible
     this.visible = visible
     if (visible && this.displayed !== undefined) {
+      if (becameVisible) {
+        this.deliverySuspended = false
+        this.clearRetry()
+        this.invalidated = false
+      }
       this.deliveryEpoch++
       this.published = undefined
       this.revision++
@@ -521,6 +530,7 @@ export class TranscriptWindowService {
     this.budgetBlocked = false
     this.published = undefined
     this.invalidated = false
+    this.deliverySuspended = false
     this.clearRetry()
     this.recentEvents.clear()
     this.notices.clear()
@@ -572,7 +582,7 @@ export class TranscriptWindowService {
         ...timelineSequenceOptions(entry.event),
         ...(entry.sequence === resident.timeline.lastSequence ? { advanceSequence: false as const } : {}),
       })
-      this.rememberLiveBodies(resident, entry.event)
+      this.rememberLiveBodies(resident, entry.event, previous)
       this.rememberChanges(resident, previous, entry.event, entry.sequence, entry.coveredSequences?.[0])
       this.bound(resident)
       this.updateCurrentTodos(resident, entry.event)
@@ -641,7 +651,7 @@ export class TranscriptWindowService {
         ? { advanceSequence: false as const }
         : {}),
     })
-    this.rememberLiveBodies(resident, event)
+    this.rememberLiveBodies(resident, event, previous)
     if (isRetainedHostNotice(event))
       this.rememberNotices(
         resident.sessionId,
@@ -667,16 +677,27 @@ export class TranscriptWindowService {
           : undefined
     if (id === undefined) return
     const node = resident.liveBodies.get(id)
-    if (node !== undefined && !resident.timeline.nodes.some((candidate) => candidate.id === node.id))
+    // Live bodies are the newest rows, so an existence probe from the tail
+    // resolves in a few steps instead of scanning the whole window.
+    if (node !== undefined && !containsNodeIdFromEnd(resident.timeline.nodes, node.id))
       resident.timeline = { ...resident.timeline, nodes: [node, ...resident.timeline.nodes] }
   }
 
-  private rememberLiveBodies(resident: Resident, event: BackendEvent): void {
+  private rememberLiveBodies(
+    resident: Resident,
+    event: BackendEvent,
+    previous: readonly TimelineNode[],
+  ): void {
     if (event.type === 'turn.ended' || event.type === 'session.removed') {
       resident.liveBodies.clear()
       return
     }
-    for (const node of resident.timeline.nodes)
+    const nodes = resident.timeline.nodes
+    // Only rows the reducer touched since `previous` can have changed their
+    // streaming/running state; earlier rows were already reconciled.
+    const start = resident.timeline.nodeChangeBase === previous ? (resident.timeline.nodeChangeStart ?? 0) : 0
+    for (let index = start; index < nodes.length; index++) {
+      const node = nodes[index]!
       if (node.kind === 'tool') {
         if (node.tool.status === 'running' || node.tool.status === 'queued')
           resident.liveBodies.set(node.id, node)
@@ -686,6 +707,7 @@ export class TranscriptWindowService {
           resident.liveBodies.set(node.id, node)
         else resident.liveBodies.delete(node.id)
       }
+    }
   }
 
   private rememberChanges(
@@ -709,6 +731,8 @@ export class TranscriptWindowService {
         })
       }
       const suffix = tracked === undefined ? undefined : appendedNodeSuffix(tracked.node, node, event)
+      if (tracked !== undefined && suffix !== undefined)
+        this.contentVersions.append(tracked.node, node, suffix)
       resident.rawChars.set(node.id, {
         node,
         chars:
@@ -783,8 +807,18 @@ export class TranscriptWindowService {
     const nodeBudget = resident.expanded === true ? TRANSCRIPT_MAX_NODES : 256
     const nodes: TimelineNode[] = []
     const source = resident.timeline.nodes
-    const candidates = source.filter((node) => !resident.contextIds.has(node.id))
-    if (preferOlder) candidates.reverse()
+    // Walk newest-first (oldest-first for a backfill merge) without copying
+    // the retained table; this runs for every accepted event.
+    let cursor = preferOlder ? 0 : source.length - 1
+    const step = preferOlder ? 1 : -1
+    const nextCandidate = (): TimelineNode | undefined => {
+      while (cursor >= 0 && cursor < source.length) {
+        const candidate = source[cursor]!
+        cursor += step
+        if (!resident.contextIds.has(candidate.id)) return candidate
+      }
+      return undefined
+    }
     const projectNode = (
       original: TimelineNode,
     ): {
@@ -835,8 +869,9 @@ export class TranscriptWindowService {
       }
       return clipped
     }
-    for (let index = candidates.length - 1; index >= 0 && nodes.length < nodeBudget - 32; index--) {
-      const original = candidates[index]!
+    while (nodes.length < nodeBudget - 32) {
+      const original = nextCandidate()
+      if (original === undefined) break
       const clipped = projectNode(original)
       const node = clipped.value
       const size = clipped.size
@@ -845,7 +880,11 @@ export class TranscriptWindowService {
         (clipped.rawSize > remaining && nodes.length > 0 && !resident.liveBodies.has(original.id))
       )
         break
-      remaining = Math.max(0, remaining - (resident.liveBodies.has(original.id) ? size : clipped.rawSize))
+      const versionChars = clipped.omitted ? JSON.stringify(original.id).length + 68 : 0
+      remaining = Math.max(
+        0,
+        remaining - (resident.liveBodies.has(original.id) ? size : clipped.rawSize) - versionChars,
+      )
       // Keep the single canonical body. Only publication projects a bounded
       // transport representation, so later deltas can never append to lost text.
       // The position sort below restores order after this newest-first walk.
@@ -856,19 +895,23 @@ export class TranscriptWindowService {
     // Context parents preserve supplied call identities and pairing, while
     // the actual page boundary follows the contiguous display rows below.
     let byId: Map<string, TimelineNode> | undefined
-    const normalIds = new Set(nodes.map((node) => node.id))
+    let normalIds: Set<string> | undefined
     const contextIds = new Set<string>()
     let contextChars = 64 * 1024
     const normalCount = nodes.length
     for (let index = 0; index < normalCount; index++) {
       const node = nodes[index]!
-      let parentId = node.kind === 'tool' ? node.tool.parentCallId : undefined
+      // Only a child tool can enter the ancestor walk. Streaming prose used
+      // to allocate an unused cycle-guard Set for every retained row.
+      if (node.kind !== 'tool' || node.tool.parentCallId === undefined) continue
+      let parentId: string | undefined = node.tool.parentCallId
       const visited = new Set<string>()
       while (parentId !== undefined && !visited.has(parentId)) {
         visited.add(parentId)
         byId ??= new Map(source.map((node) => [node.id, node]))
         const parent = byId.get(parentId)
         if (parent?.kind !== 'tool') break
+        normalIds ??= new Set(nodes.map((node) => node.id))
         if (!normalIds.has(parentId) && !contextIds.has(parentId)) {
           const clipped = projectNode(parent)
           if (contextIds.size >= 32 || clipped.rawSize > contextChars) break
@@ -938,6 +981,7 @@ export class TranscriptWindowService {
         hasMore: resident.hasMore,
         historical: resident !== this.tail,
         omittedNodeIds: [...resident.omitted],
+        ...(resident.omitted.size === 0 ? {} : { contentVersions: this.omittedContentVersions(resident) }),
         ...(resident.before === undefined ? {} : { beforeSequence: resident.before }),
         ...(resident.timeline.activeTurn === undefined ? {} : { activeTurn: resident.timeline.activeTurn }),
         ...(resident.timeline.tokenUsage === undefined ? {} : { tokenUsage: resident.timeline.tokenUsage }),
@@ -972,6 +1016,14 @@ export class TranscriptWindowService {
   }
 
   /** Compare source identities before sanitizing unchanged metadata again. */
+  private omittedContentVersions(resident: Resident): Readonly<Record<string, string>> {
+    return Object.fromEntries(
+      resident.timeline.nodes
+        .filter((node) => resident.omitted.has(node.id))
+        .map((node) => [node.id, this.contentVersions.key(node)]),
+    )
+  }
+
   private metadataSource(resident: Resident): WindowMetadataSource {
     return {
       facts: resident.factCounter,
@@ -982,6 +1034,8 @@ export class TranscriptWindowService {
       before: resident.before,
       historical: resident !== this.tail,
       omitted: JSON.stringify([...resident.omitted]),
+      contentVersions:
+        resident.omitted.size === 0 ? '' : JSON.stringify(this.omittedContentVersions(resident)),
       todos: this.tail?.currentTodos,
       todosOmitted: this.tail?.currentTodosOmitted,
     }
@@ -997,6 +1051,7 @@ export class TranscriptWindowService {
     // even while ordinary streaming has exhausted its delivery credits.
     if (
       !this.visible ||
+      this.deliverySuspended ||
       this.posting ||
       (!urgent && this.budgetBlocked) ||
       this.pendingAcks.size >= credits + (urgent ? 1 : 0)
@@ -1020,6 +1075,7 @@ export class TranscriptWindowService {
     const retrying = this.retryAttempt < DELIVERY_RETRY_LIMIT
     this.deps.report?.({ attempt: this.retryAttempt + 1, retrying })
     if (!retrying) {
+      this.deliverySuspended = true
       const sessionId = this.displayed?.sessionId
       if (this.invalidated || sessionId === undefined) return
       this.invalidated = true
@@ -1315,6 +1371,12 @@ function assistantKey(
       ? event.messageId
       : ''
 }
+/** Existence probe from the tail: live rows are the newest in the window. */
+function containsNodeIdFromEnd(nodes: readonly TimelineNode[], id: string): boolean {
+  for (let index = nodes.length - 1; index >= 0; index--) if (nodes[index]!.id === id) return true
+  return false
+}
+
 function stale(): AppError {
   return new AppError({
     code: 'STALE_INTERACTION',
@@ -1346,6 +1408,7 @@ export function isTranscriptEvent(event: BackendEvent): boolean {
     'permission.resolved',
     'question.requested',
     'question.resolved',
+    'question.reply.status',
     'connection.lost',
     'connection.restored',
     'archived.sessions.changed',
