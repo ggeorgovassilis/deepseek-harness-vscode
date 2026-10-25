@@ -4,6 +4,9 @@ import type { DshTransport } from './contracts.js'
 import { eventSessionId, eventTransientSequence, normalizeEnvelope, safeReason } from './stream-envelopes.js'
 import { STREAM_BATCH_SIZE, STREAM_TIME_SLICE_MS, yieldToEventLoop } from './stream-scheduling.js'
 
+/** Minimum interval between gap-driven stream re-subscriptions. */
+const TRANSIENT_RESTART_COOLDOWN_MS = 1_000
+
 export interface DshStreamControllerOptions {
   /** Optional version-specific logical stream (for example alpha Remote mux). */
   readonly streamSource?: (signal: AbortSignal) => AsyncIterable<unknown>
@@ -31,6 +34,19 @@ interface OrderedSessionDelivery {
   readonly abort: AbortController
   emittedSinceYield: number
   workMsSinceYield: number
+  /**
+   * Ascending cursor over the positions this delivery still owes, as lazily
+   * pruned min-heaps. Hole lookups peek here instead of rescanning both
+   * collections for every missing position; queued additions push into the
+   * heaps and removals are dropped when they reach the top.
+   */
+  rangeOrder?: OrderedRangeOrder
+}
+
+interface OrderedRangeOrder {
+  /** Min-heap of pending sequence numbers; see `heldSequencesAfter`. */
+  readonly pending: number[]
+  readonly skipped: number[]
 }
 
 /** One shared mux/host reader for every consumer in an Extension Host. */
@@ -55,6 +71,8 @@ export class DshStreamController implements AsyncEventSource<BackendEvent> {
   private retryAttempt = 0
   private connectionLost = false
   private restartTask: Promise<void> | undefined
+  private transientRestartTimer: ReturnType<typeof setTimeout> | undefined
+  private transientRestartPending = false
   private closed = false
 
   public constructor(
@@ -76,6 +94,7 @@ export class DshStreamController implements AsyncEventSource<BackendEvent> {
       if (this.listeners.size === 0) {
         if (this.retryTimer !== undefined) clearTimeout(this.retryTimer)
         this.retryTimer = undefined
+        this.clearTransientRestart()
         this.lifetime?.abort()
       }
     }
@@ -86,6 +105,7 @@ export class DshStreamController implements AsyncEventSource<BackendEvent> {
     this.closed = true
     if (this.retryTimer !== undefined) clearTimeout(this.retryTimer)
     this.retryTimer = undefined
+    this.clearTransientRestart()
     this.lifetime?.abort()
     this.clearOrderedDeliveries()
     this.listeners.clear()
@@ -102,6 +122,8 @@ export class DshStreamController implements AsyncEventSource<BackendEvent> {
   public async restart(): Promise<void> {
     if (this.closed) return
     if (this.restartTask !== undefined) return this.restartTask
+    // This fresh baseline also fulfills any coalesced request from the old stream.
+    this.transientRestartPending = false
     const task = (async (): Promise<void> => {
       if (this.retryTimer !== undefined) clearTimeout(this.retryTimer)
       this.retryTimer = undefined
@@ -126,9 +148,48 @@ export class DshStreamController implements AsyncEventSource<BackendEvent> {
     }
   }
 
+  /**
+   * Heal a transient sequence gap without hot-looping the stream. A dropped
+   * chunk is unrecoverable except by re-subscribing, but a flood of reasoning
+   * deltas can drop chunks repeatedly. The first gap re-subscribes immediately;
+   * subsequent gaps are retained as one trailing recovery, even if no more
+   * frames arrive after the stream becomes incomplete.
+   * `setTimeout` is the only timer so tests can drive the window with fake
+   * clocks.
+   */
+  private restartForTransientGap(): void {
+    if (this.closed || this.listeners.size === 0) return
+    if (this.transientRestartTimer !== undefined) {
+      this.transientRestartPending = true
+      return
+    }
+    if (this.restartTask !== undefined) {
+      // A new generation can publish before restart() finishes its teardown.
+      // Keep its gap until that in-flight restart releases its guard.
+      this.transientRestartPending = true
+      void this.restartTask.then(() => {
+        if (this.transientRestartPending) this.restartForTransientGap()
+      })
+      return
+    }
+    this.transientRestartPending = false
+    this.transientRestartTimer = setTimeout(() => {
+      this.transientRestartTimer = undefined
+      if (this.transientRestartPending) this.restartForTransientGap()
+    }, TRANSIENT_RESTART_COOLDOWN_MS)
+    void this.restart()
+  }
+
+  private clearTransientRestart(): void {
+    if (this.transientRestartTimer !== undefined) clearTimeout(this.transientRestartTimer)
+    this.transientRestartTimer = undefined
+    this.transientRestartPending = false
+  }
+
   private startReading(): void {
     if (this.closed || this.listeners.size === 0 || this.reading !== undefined) return
     if (this.options.streamSource !== undefined) {
+      this.transientRestartPending = false
       // A streamSource session starts every generation with a fresh bounded
       // snapshot. Keep the durable watermark for recovery, but make the next
       // session/subscribed frame establish the snapshot boundary again.
@@ -342,8 +403,10 @@ export class DshStreamController implements AsyncEventSource<BackendEvent> {
       if (previousTransient !== undefined && transientSequence > previousTransient + 1) {
         // Unlike durable frames, transient assistant chunks cannot be
         // recovered from session.history. A queue drop is therefore healed by
-        // taking the stream's authoritative snapshot/baseline again.
-        void this.restart()
+        // taking the stream's authoritative snapshot/baseline again — but a
+        // reasoning flood can drop chunks repeatedly, so the re-subscription
+        // is coalesced behind a cooldown instead of firing per dropped frame.
+        this.restartForTransientGap()
         return
       }
       if (previousTransient !== undefined && transientSequence <= previousTransient) return
@@ -383,6 +446,7 @@ export class DshStreamController implements AsyncEventSource<BackendEvent> {
     if (pending.some((candidate) => sameBackendEvent(candidate, event))) return
     pending.push(event)
     delivery.pending.set(sequence, pending)
+    queueHeldSequence(delivery, sequence, false)
     this.lastSequences.set(sessionId, Math.max(this.lastSequences.get(sessionId) ?? -1, sequence))
     this.retryAttempt = 0
     this.startOrderedDrain(sessionId, signal)
@@ -482,12 +546,14 @@ export class DshStreamController implements AsyncEventSource<BackendEvent> {
         !this.rememberProjectionSequence(event.sessionId, candidate.key, sequence)
       ) {
         delivery.skippedSequences.add(sequence)
+        queueHeldSequence(delivery, sequence, true)
         continue
       }
       const pending = delivery.pending.get(sequence) ?? []
       if (pending.some((existing) => sameBackendEvent(existing, candidate))) continue
       pending.push(candidate)
       delivery.pending.set(sequence, pending)
+      queueHeldSequence(delivery, sequence, false)
     }
     if (signal.aborted || this.closed) return
     this.lastSequences.set(event.sessionId, Math.max(previous, event.lastSequence))
@@ -558,7 +624,7 @@ export class DshStreamController implements AsyncEventSource<BackendEvent> {
       }
       if (requiredThrough !== undefined) delete delivery.recoveryThrough
 
-      const firstPending = smallestPendingSequence(delivery.pending, next)
+      const firstPending = heldSequencesAfter(delivery, next).pending
       if (firstPending === undefined || firstPending <= next) return
       await this.recoverOrderedRange(sessionId, delivery, next, firstPending - 1, signal)
     }
@@ -597,12 +663,14 @@ export class DshStreamController implements AsyncEventSource<BackendEvent> {
         !this.rememberProjectionSequence(sessionId, candidate.key, sequence)
       ) {
         delivery.skippedSequences.add(sequence)
+        queueHeldSequence(delivery, sequence, true)
         continue
       }
       const pending = delivery.pending.get(sequence) ?? []
       if (pending.some((existing) => sameBackendEvent(existing, candidate))) continue
       pending.push(candidate)
       delivery.pending.set(sequence, pending)
+      queueHeldSequence(delivery, sequence, false)
     }
 
     while (
@@ -612,8 +680,8 @@ export class DshStreamController implements AsyncEventSource<BackendEvent> {
       this.orderedDeliveries.get(sessionId) === delivery
     ) {
       const next = delivery.nextSequence
-      const pending = delivery.pending.get(next)
-      if (pending !== undefined && pending.length > 0) {
+      const held = heldSequencesAfter(delivery, next)
+      if (held.pending === next) {
         if (
           delivery.emittedSinceYield >= STREAM_BATCH_SIZE ||
           delivery.workMsSinceYield >= STREAM_TIME_SLICE_MS
@@ -627,21 +695,44 @@ export class DshStreamController implements AsyncEventSource<BackendEvent> {
         this.emitPendingSequence(sessionId, delivery, next)
         continue
       }
-      if (delivery.skippedSequences.delete(next)) {
+      if (held.skipped === next) {
+        // Skips and gap notices are drain work too. Without charging them
+        // against the yield budget, a range of filtered or unrecoverable rows
+        // could advance thousands of positions without letting the host
+        // heartbeat run.
+        if (
+          delivery.emittedSinceYield >= STREAM_BATCH_SIZE ||
+          delivery.workMsSinceYield >= STREAM_TIME_SLICE_MS
+        ) {
+          delivery.emittedSinceYield = 0
+          delivery.workMsSinceYield = 0
+          await yieldToEventLoop(AbortSignal.any([signal, delivery.abort.signal]))
+          continue
+        }
+        delivery.skippedSequences.delete(next)
         delivery.nextSequence = next + 1
+        delivery.emittedSinceYield++
         continue
       }
-      const nextPresent = smallestPendingSequence(delivery.pending, next + 1, toSequence)
-      const nextSkipped = smallestSkippedSequence(delivery.skippedSequences, next + 1, toSequence)
-      const firstPresent =
-        nextPresent === undefined
-          ? nextSkipped
-          : nextSkipped === undefined
-            ? nextPresent
-            : Math.min(nextPresent, nextSkipped)
-      const gapTo = firstPresent === undefined ? toSequence : firstPresent - 1
+      const firstKnown =
+        held.pending === undefined
+          ? held.skipped
+          : held.skipped === undefined
+            ? held.pending
+            : Math.min(held.pending, held.skipped)
+      const gapTo = Math.min(firstKnown === undefined ? toSequence : firstKnown - 1, toSequence)
+      if (
+        delivery.emittedSinceYield >= STREAM_BATCH_SIZE ||
+        delivery.workMsSinceYield >= STREAM_TIME_SLICE_MS
+      ) {
+        delivery.emittedSinceYield = 0
+        delivery.workMsSinceYield = 0
+        await yieldToEventLoop(AbortSignal.any([signal, delivery.abort.signal]))
+        continue
+      }
       this.emit({ type: 'session.gap', sessionId, fromSequence: next, toSequence: gapTo })
       delivery.nextSequence = gapTo + 1
+      delivery.emittedSinceYield += gapTo - next + 1
     }
   }
 
@@ -769,30 +860,88 @@ function createOrderedDelivery(nextSequence: number): OrderedSessionDelivery {
   }
 }
 
-function smallestPendingSequence(
-  pending: ReadonlyMap<number, BackendEvent[]>,
+/**
+ * Smallest durable positions at or above `minimum` that this delivery still
+ * holds, from lazily pruned min-heaps over `pending` and `skippedSequences`.
+ * The drain consumes positions in ascending order, so heap entries at or
+ * below the cursor (or whose row was removed) are popped once and never
+ * revisited; additions push in O(log n) and cannot be missed mid-walk.
+ */
+function heldSequencesAfter(
+  delivery: OrderedSessionDelivery,
   minimum: number,
-  maximum = Number.MAX_SAFE_INTEGER,
-): number | undefined {
-  let smallest: number | undefined
-  for (const sequence of pending.keys()) {
-    if (sequence < minimum || sequence > maximum) continue
-    if (smallest === undefined || sequence < smallest) smallest = sequence
+): { pending: number | undefined; skipped: number | undefined } {
+  if (delivery.rangeOrder === undefined) {
+    delivery.rangeOrder = {
+      pending: heapifySequences([...delivery.pending.keys()]),
+      skipped: heapifySequences([...delivery.skippedSequences]),
+    }
   }
-  return smallest
+  const order = delivery.rangeOrder
+  while (order.pending.length > 0) {
+    const sequence = order.pending[0]!
+    const bucket = delivery.pending.get(sequence)
+    if (sequence >= minimum && bucket !== undefined && bucket.length > 0) break
+    heapPopSequence(order.pending)
+  }
+  while (order.skipped.length > 0) {
+    const sequence = order.skipped[0]!
+    if (sequence >= minimum && delivery.skippedSequences.has(sequence)) break
+    heapPopSequence(order.skipped)
+  }
+  return { pending: order.pending[0], skipped: order.skipped[0] }
 }
 
-function smallestSkippedSequence(
-  skipped: ReadonlySet<number>,
-  minimum: number,
-  maximum: number,
-): number | undefined {
-  let smallest: number | undefined
-  for (const sequence of skipped) {
-    if (sequence < minimum || sequence > maximum) continue
-    if (smallest === undefined || sequence < smallest) smallest = sequence
+/** Make a queued position visible to an already armed drain cursor. */
+function queueHeldSequence(delivery: OrderedSessionDelivery, sequence: number, skipped: boolean): void {
+  const order = delivery.rangeOrder
+  if (order === undefined) return
+  heapPushSequence(skipped ? order.skipped : order.pending, sequence)
+}
+
+function heapifySequences(sequences: readonly number[]): number[] {
+  const heap = [...sequences]
+  for (let index = (heap.length >> 1) - 1; index >= 0; index--) siftHeapDown(heap, index)
+  return heap
+}
+
+function heapPushSequence(heap: number[], sequence: number): void {
+  let index = heap.push(sequence) - 1
+  while (index > 0) {
+    const parent = (index - 1) >> 1
+    if (heap[parent]! <= heap[index]!) break
+    const swap = heap[parent]!
+    heap[parent] = heap[index]!
+    heap[index] = swap
+    index = parent
   }
-  return smallest
+}
+
+function heapPopSequence(heap: number[]): number {
+  const top = heap[0]!
+  const last = heap.pop()
+  if (heap.length > 0 && last !== undefined) {
+    heap[0] = last
+    siftHeapDown(heap, 0)
+  }
+  return top
+}
+
+function siftHeapDown(heap: number[], start: number): void {
+  const length = heap.length
+  let index = start
+  for (;;) {
+    const left = 2 * index + 1
+    const right = left + 1
+    let smallest = index
+    if (left < length && heap[left]! < heap[smallest]!) smallest = left
+    if (right < length && heap[right]! < heap[smallest]!) smallest = right
+    if (smallest === index) return
+    const swap = heap[smallest]!
+    heap[smallest] = heap[index]!
+    heap[index] = swap
+    index = smallest
+  }
 }
 
 function sameBackendEvent(left: BackendEvent, right: BackendEvent): boolean {
