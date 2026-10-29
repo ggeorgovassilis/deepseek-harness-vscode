@@ -1,8 +1,8 @@
-# DeepSeek Harness Companion for VS Code
+# JaboDSH
 
 Bring local or remote [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) sessions into VS Code. Follow streaming replies, thinking, tools, approvals, questions, and conversation history beside your code.
 
-This is an unofficial extension for DeepSeek Harness.
+JaboDSH is an independent community project for DeepSeek Harness.
 
 ## Use the extension
 
@@ -12,31 +12,39 @@ This is an unofficial extension for DeepSeek Harness.
 - Open produced files through VS Code, and use local templates, checkpoints, Changes, and task views when available.
 - Use the compact DSH-style focused layout, or switch to the classic layout in **Settings → General → Conversation layout**.
 - Open sessions in editor tabs alongside the side bar, with independent navigation and restored sessions after a window reload.
+- Click the conversation title to choose a session; keyboard navigation works in the dropdown. In an editor, selecting a session opens or reveals its own tab.
+- In compact transcript view, keep recent and ongoing/error activity visible and use **Show all activity** to expand earlier traces.
 - Enable optional session cost estimates in **Settings → Models → Model billing**. Inspect input, output and cache costs, choose a reference model, or enter custom rates. Chinese uses CNY and English uses USD; saved exchange quotes remain available when a refresh fails.
 
-Available operations depend on the connected DSH runtime. Unsupported capabilities are shown explicitly; [exact compatibility and current limitations](https://github.com/Jabofish/deepseek-harness-vscode/tree/main/docs) are documented in the repository.
+See the [compatibility guide](https://github.com/Jabofish/deepseek-harness-vscode/blob/main/docs/dsh-contract.en.md) for supported DSH versions and the [feature list](https://github.com/Jabofish/deepseek-harness-vscode/blob/main/docs/capability-matrix.en.md) for individual capabilities.
 
-The optional [editor integration](https://github.com/Jabofish/deepseek-harness-vscode/tree/main/packages/dsh-editor-bridge) provides unsaved text/selection, diagnostics, language services, navigation and undoable edits. Choose **Settings → General → Editor integration → Install and enable companion** to install it. Once enabled, it follows your selected session and extension updates. Settings provides status, off/read-only switches and recovery actions, including Undo. Available tools depend on the companion and DSH versions. Chat and manual context attachment remain available without it.
+The optional [editor integration](https://github.com/Jabofish/deepseek-harness-vscode/tree/main/packages/dsh-editor-bridge) lets DSH read unsaved text, selections and diagnostics, use language services, and apply undoable edits. Install it through **Settings → General → Editor integration → Install and enable companion**. The same settings page provides read-only mode, disable and Undo controls.
 
 ## Get started
 
-Download a matching platform VSIX (or the universal package) from [GitHub Releases](https://github.com/Jabofish/deepseek-harness-vscode/releases/latest) and run **Extensions: Install from VSIX...**. Match the Extension Host's platform for remote workspaces. Use these files if the Marketplace listing is unavailable.
+Install [JaboDSH from the Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=Jabofish.jabodsh), or run `code --install-extension Jabofish.jabodsh`.
 
-1. Open the **DeepSeek Harness** view.
+For manual installation, download a matching platform VSIX (or the universal package) from [GitHub Releases](https://github.com/Jabofish/deepseek-harness-vscode/releases/latest) and run **Extensions: Install from VSIX...**. Match the Extension Host's platform for remote workspaces.
+
+If you used `Direwolf.deepseek-harness-client`, disable or uninstall it before installing JaboDSH to avoid duplicate commands and views. Keep its data if you need its local templates or checkpoints. Existing `dsh.*` settings and commands remain compatible; DSH session data stays in the runtime. Private extension storage, saved editor tabs and Webview preferences do not migrate automatically. Reopen sessions, authorise external connections again, and check editor companion status. See the [migration instructions](https://github.com/Jabofish/deepseek-harness-vscode#switch-from-the-previous-extension).
+
+1. Open the **JaboDSH** view.
 2. If DSH is missing, use the guided installer, select an existing executable, or copy the exact install command shown in the view. The installer shows npm output and verifies the installed version; npm warnings alone do not fail the installation.
 3. Choose or create a workspace, start a session, and send a task.
 
 The Chat view is registered in VS Code's Secondary Side Bar by default (on the right in the default workbench layout). VS Code may keep a previously saved view location after an upgrade.
 
-Choose **Open in Editor Area** or run **DSH: Open Chat in Editor Area** (`/moveto:editor`); `/moveto:sidebar` returns the chat. You can drag an opened editor tab to split. The side bar remains available for other sessions. The native title bar shows its full controls when space permits; narrower views move lower-priority actions into **More**, keeping **Sessions** and **Settings** visible.
+Choose **Open in Editor Area** or run **JaboDSH: Open Chat in Editor Area** (`/moveto:editor`); `/moveto:sidebar` returns the chat. You can drag an opened editor tab to split. The side bar remains available for other sessions. The native title bar shows its full controls when space permits; narrower views move lower-priority actions into **More**, keeping **Sessions** and **Settings** visible.
 
 **Open Web UI** uses VS Code's integrated browser by default. To use your system browser, set `dsh.webUi.browser` to `external` in VS Code Settings.
 
-To drag a session directly into a split, run **DSH: Open Drag Sessions** to open **DSH Sessions** in Explorer, then drag a session row to an editor edge. The Explorer list is hidden until you run that command.
+Set `dsh.completionCue` to `notification` or `bell` for a cue after a successful live reply finishes rendering while VS Code is unfocused; the default is `off`. Notifications use VS Code's notification UI. Desktop popups and sound depend on editor, browser and operating system settings.
+
+To drag a session directly into a split, run **JaboDSH: Open Drag Sessions** to open **JaboDSH Sessions** in Explorer, then drag a session row to an editor edge. The Explorer list is hidden until you run that command.
 
 Without a specified target, auto validates the last successful local connection first, then discovers compatible instances before starting one. An explicit server URL or attachment port list restricts connection to those targets; failure leaves Settings and Retry available. Connection modes also let you attach only, start an isolated extension-owned instance, or probe one configured HTTP(S) endpoint (which may be remote). It never stops an external DSH. Runtime updates install a verified exact version and do not restart external processes.
 
-For an external instance, select `custom`, set `dsh.connection.serverUrl` to its HTTP(S) origin and `dsh.connection.runtimeVersion` to its exact supported version. Run **DSH: Authorize External Connection**, enter its launch token (leave blank for anonymous access), then connect. Credentials stay in SecretStorage per execution environment and full origin; **DSH: Clear External Connection Credentials** removes the current environment's grant. Authorise again after changing execution environments or origins.
+For an external instance, select `custom`, set `dsh.connection.serverUrl` to its HTTP(S) origin and `dsh.connection.runtimeVersion` to its exact supported version. Run **JaboDSH: Authorize External Connection**, enter its launch token (leave blank for anonymous access), then connect. Credentials stay in SecretStorage per execution environment and full origin; **JaboDSH: Clear External Connection Credentials** removes the current environment's grant. Authorise again after changing execution environments or origins.
 
 HTTPS requires a trusted certificate. Remote HTTP needs explicit plaintext confirmation and renewed authorization after DNS address changes. The server must accept the configured host; use `--trusted-host host:port` where supported for a proxy. Remote connections do not grant local file or inspector access. See the [connection guide](https://github.com/Jabofish/deepseek-harness-vscode#connect-to-an-external-instance).
 
