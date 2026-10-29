@@ -2,7 +2,7 @@
   "name": "deepseek-harness-client",
   "displayName": "DeepSeek Harness Companion for VS Code",
   "description": "Run DSH sessions, tools, and coding tasks in VS Code.",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "publisher": "Direwolf",
   "icon": "resources/dsh.png",
   "license": "MIT",
@@ -543,6 +543,17 @@
     "configuration": {
       "title": "DeepSeek Harness",
       "properties": {
+        "dsh.completionCue": {
+          "type": "string",
+          "enum": [
+            "notification",
+            "bell",
+            "off"
+          ],
+          "default": "off",
+          "scope": "application",
+          "description": "Cue after a live response is rendered while the VS Code window is unfocused. Notification uses VS Code notifications; bell plays a brief sound in the chat. Notification and audio delivery follow the editor, browser and operating system settings."
+        },
         "dsh.editor.enabled": {
           "type": "boolean",
           "default": true,
@@ -632,8 +643,8 @@
         "dsh.runtime.executablePath": {
           "type": "string",
           "default": "",
-          "scope": "machine-overridable",
-          "description": "Optional absolute path to the DSH executable. Leave empty for automatic discovery."
+          "scope": "machine",
+          "description": "Optional absolute path to the DSH executable. Leave empty for automatic discovery. Never overridable by workspace settings."
         },
         "dsh.runtime.autoStart": {
           "type": "boolean",

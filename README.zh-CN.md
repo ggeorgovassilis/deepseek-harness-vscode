@@ -8,6 +8,8 @@
 
 **DeepSeek Harness Companion for VS Code** 把本地或远程 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness)会话带进编辑器。在代码旁查看流式回复、思考、工具、审批和会话历史。
 
+这是一个非官方的 DeepSeek Harness 扩展。
+
 ## 可以做什么
 
 - 在工作区中创建、切换、恢复和归档会话。
@@ -37,7 +39,11 @@ DeepSeek Harness 的 Chat 视图默认注册在辅助侧边栏（VS Code 默认�
 
 标题栏的 **Open Web UI** 默认使用 VS Code 内置浏览器。若要使用系统浏览器，在 VS Code 设置中将 `dsh.webUi.browser` 改为 `external`。
 
+在 VS Code 设置中将 `dsh.completionCue` 设为 `notification`（通知）或 `bell`（短提示音），可在 VS Code 失去焦点、实时回复成功结束并渲染后提醒；默认 `off`（关闭）。通知使用 VS Code 通知界面；桌面弹窗和声音的实际投递受编辑器、浏览器及操作系统设置影响。
+
 选择 **在编辑器区打开** 或执行 **DSH: Open Chat in Editor Area**（`/moveto:editor`）打开标签，`/moveto:sidebar` 可移回侧边栏。也可拖动已打开的编辑器标签分栏。手动排序时，列表内拖动仍用于调整顺序。
+
+点击对话标题可通过下拉菜单选择其他会话：侧边栏直接切换当前对话，编辑器内则打开或显示所选会话自己的标签。支持方向键、Enter 和 Escape。
 
 要直接拖拽会话分栏，可执行 **DSH: Open Drag Sessions**，在资源管理器中打开 **DSH Sessions**，将会话行拖到编辑器边缘即可分栏打开。运行该命令后才会显示资源管理器中的会话列表。
 
@@ -51,6 +57,8 @@ DeepSeek Harness 的 Chat 视图默认注册在辅助侧边栏（VS Code 默认�
 | `custom`       | 只探测用户给定且经过校验的单个 HTTP(S) 端点。              |
 
 常规设置页可以检查上游包版本并安装已验证的精确版本。更新全局包不会停止外部 DSH。
+
+Windows 安装时先在同一磁盘的独立目录安装并验证新版 CLI，再切换全局包和启动入口。切换前只停止扩展持有的 DSH 进程树，完成后恢复连接。文件锁重试最多两秒；无法切换时保留旧包并提示重试。安装输出会通过 Windows Restart Manager 尝试列出剩余占用程序的名称和 PID，关闭对应程序后可重试。切换失败会恢复原包及启动入口，中断的切换在下次安装时恢复。磁盘需临时容纳两个版本，配置和会话仍保留在原位置。
 
 ## 连接外部实例
 
