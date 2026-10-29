@@ -1,10 +1,18 @@
 # DSH 上游契约与兼容策略
 
-本文件是开发文档中 **DSH 精确版本、wire 差异和安装默认的唯一位置**。代码中的 `SUPPORTED_DSH_VERSIONS`、版本化 Adapter、`LATEST_PUBLISHED_DSH_VERSION` 与脱敏契约 fixture 是实现事实；本表解释边界，不能凭版本号相近推断兼容。能力是否完成见 [能力矩阵](capability-matrix.md)，测试与发布门禁见 [质量流程](quality.md)。
+[English](dsh-contract.en.md) | [简体中文](dsh-contract.md)
+
+本文件及英文版记录 DSH 的支持版本、协议差异和安装默认。以代码中的 `SUPPORTED_DSH_VERSIONS`、版本化 Adapter、`LATEST_PUBLISHED_DSH_VERSION` 及脱敏契约 fixture 为准，不能凭版本号相近推断兼容。能力状态见[能力矩阵](capability-matrix.md)，测试与发布检查见[质量流程](quality.md)。
+
+## 阅读方式
+
+先找到目标版本行，再核对 Adapter、固定源码和本次改动实际使用的接口；保留相邻版本拒绝及历史回归。版本表和安装默认按下文代码常量维护，能力状态在矩阵中维护。检查上游新发布时，另行查询 npm 远端标签。
+
+分层要求见[架构](architecture.md)，隔离运行方法见[测试指南](quality.md#isolated-native-dsh)。翻译或修改契约时保留准确的字段名、版本身份和源码哈希。
 
 ## 上游来源与安装默认
 
-当前上游最新发布包为 `@deepseek-ai/dsh@0.2.1-rc.3`（npm `next`，`latest` 仍为 rc.2）；扩展引导安装默认包为 `@deepseek-ai/dsh@0.2.1-rc.2`，固定源码见下文版本表，隔离验证方法见[质量流程](quality.md)。发布版本与安装默认分别由 `LATEST_PUBLISHED_DSH_VERSION`、`DEFAULT_INSTALL_DSH_VERSION` 维护；新增适配不自动切换默认，安装和更新均使用经过验证的精确版本，不跟随浮动 dist-tag。默认版本不代表所有能力完成，timed 提问等验收缺口仍见能力矩阵。
+本仓库记录的最新发布包为 `@deepseek-ai/dsh@0.2.2-alpha.2`；扩展引导安装默认包为 `@deepseek-ai/dsh@0.2.1-rc.2`，固定源码见下文版本表，隔离验证方法见[质量流程](quality.md)。该记录是仓库的适配快照；npm 远端的 `latest` / `next` 指向需另行查询。发布版本与安装默认分别由 `LATEST_PUBLISHED_DSH_VERSION`、`DEFAULT_INSTALL_DSH_VERSION` 维护；新增适配不自动切换默认，安装和更新均使用经过验证的精确版本，不跟随浮动 dist-tag。默认版本不代表所有能力完成，timed 提问等验收缺口仍见能力矩阵。
 
 历史 Host API 的固定基线是提交 [`47f943859bef60e4160492346772ded9b24f765a`](https://github.com/deepseek-ai/deepseek-harness/tree/47f943859bef60e4160492346772ded9b24f765a)：[RPC map](https://github.com/deepseek-ai/deepseek-harness/blob/47f943859bef60e4160492346772ded9b24f765a/packages/host/apiproxy/src/api/rpc-map.ts)、[events](https://github.com/deepseek-ai/deepseek-harness/blob/47f943859bef60e4160492346772ded9b24f765a/packages/host/apiproxy/src/api/events.ts)、[tool catalog](https://github.com/deepseek-ai/deepseek-harness/tree/47f943859bef60e4160492346772ded9b24f765a/packages/core/tools)。它只证明该 Host API 家族；较新的 Connection/Gateway、typed Remote 和 Session Controller 必须从**目标版本自己的 tag/commit 和实际存在的接口文件**核对。尤其 `0.1.5-rc.2` 与 `0.1.5-rc.3` 的 wire 比较不能引用上述已不存在的旧 RPC 文件；两者被适配器消费的 Session Controller、typed Remote、Connection/Gateway 与工具运行时源码相同，仍保留各自精确身份。
 
@@ -36,12 +44,16 @@
 | `0.2.1-rc.1`                                                                        | `rc211`                                         | 独立入口，复用已核对 alpha.5 消费契约；不作为未知版本回退                                                                                                         |
 | `0.2.1-rc.2`                                                                        | `rc212`                                         | 独立入口，复用已核对 rc.1 消费契约；动态承接 Search / Fetch 设置；不作为未知版本回退                                                                              |
 | `0.2.1-rc.3`                                                                        | `rc213`                                         | 独立精确入口；按预设复用空白草稿，动态承接官方模型目录与 listing 设置；不作为未知版本回退                                                                         |
+| `0.2.1-rc.4`                                                                        | `rc214`                                         | 独立精确身份；消费的 rc.3 契约不变，不参与未知版本回退。                                                                                                          |
+| `0.2.2-alpha.2`                                                                     | `alpha222`                                      | 精确 V4 codec；显式激活实时会话、保留本地会话归属的完整图片引用读取、阻塞授权选项、模型失效通知与平台拒绝；不参与未知版本回退。                                   |
 
 `0.1.7-rc.2` 的固定源码是 [tag `dsh-v0.1.7-rc.2`](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.1.7-rc.2)，提交 `477b4f420553e8a52c2fbccc464d7561b239c443`。其他新增版本也必须在 fixture 注明 tag、commit、文件和类型；版本身份、schema、错误词汇、启动参数与能力声明一起核对。
 
 `0.2.0-rc.1` 的固定来源是 [tag `dsh-v0.2.0-rc.1`](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.2.0-rc.1)，提交 `4878cdabd87d4041bdaff61d04c966883b9fd07a`。从预适配提交 `21638c56315ae6a2b552d6091945d3144c9af32e` 到该发布提交，Adapter 消费的 Gateway、Connection、Session、Workspace、Job、Account、Schedule、Plugin Manager、CLI 参数及工具恢复源码未变；Workspace 默认目录的原生命令改为隐藏窗口，Web profile 新增会话日志设置 UI 与遥测超时配置，均不改变此处的 Remote wire。`rc201` 保留独立精确入口，不接受旧的临时 master 版本提示。
 
-`0.2.0-rc.2` 的固定来源是 [tag `dsh-v0.2.0-rc.2`](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.2.0-rc.2)，提交 `639ed015397290b3745d163aafe02ffee4aa3f84`。相对 rc.1，Gateway、Session V4、Workspace、Job、Schedule、Account 和 Plugin Manager 的既有接口保持不变；`packages/api/remotes/src/client/index.ts` 新挂载 `dsh-user-questions`。其 wire descriptor 把首个 Agent 参数命名为 `agentId`，值沿用所属 Session ID；rc.2 Adapter 只在 Remote 边界把 Host 校验过的 `sessionId` 映射为 `agentId`。`userQuestions/attachWait` 是可取消流，只发一次 Host 剩余时长；打开 UI claim 暂停原截止时间，关闭/卸载后释放。`userQuestions/answer` 仅接受 `continued` 问题，把完整答案批次作为 `user-question-reply` 消息排入 Inbox；已排队答复必须显示只读，直到 Inbox 接纳或丢弃。Session projection 从 timed `ask_user_question` 的结构化请求/结果恢复 `active` 与 `settled`，legacy tool schema 不投影为 timed question。新工具模式仍由 DSH 的 `tool-ask-user` 插件配置启用，扩展不替用户切换 Preset。参数 `timeout: -1` 虽使用同一工具 schema，但属于无限等待，不携带 timed wait claim；UI 是否启动倒计时只依据 question event 中的 `wait.timed`。`rc202` 独立继承 `rc201`，不用于未知版本回退。
+`0.2.0-rc.2` 的固定来源是 [tag `dsh-v0.2.0-rc.2`](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.2.0-rc.2)，提交 `639ed015397290b3745d163aafe02ffee4aa3f84`。相对 rc.1，Gateway、Session V4、Workspace、Job、Schedule、Account 和 Plugin Manager 的既有接口保持不变；`packages/api/remotes/src/client/index.ts` 新挂载 `dsh-user-questions`。其 wire descriptor 把首个 Agent 参数命名为 `agentId`，值沿用所属 Session ID；rc.2 Adapter 只在 Remote 边界把 Host 校验过的 `sessionId` 映射为 `agentId`。`userQuestions/attachWait` 是可取消流，只发一次 Host 剩余时长；打开 UI claim 暂停原截止时间，关闭/卸载后释放。`userQuestions/answer` 仅接受 `continued` 问题，把完整答案批次作为 `user-question-reply` 消息排入 Inbox；已排队答复必须显示只读，直到 Inbox 接纳或丢弃。Session projection 从 timed `ask_user_question` 的结构化请求/结果恢复 `active` 与 `settled`，legacy tool schema 不投影为 timed question。
+
+新工具模式仍由 DSH 的 `tool-ask-user` 插件配置启用，扩展不替用户切换 Preset。参数 `timeout: -1` 虽使用同一工具 schema，但属于无限等待，不携带 timed wait claim；UI 是否启动倒计时只依据 question event 中的 `wait.timed`。`rc202` 独立继承 `rc201`，不用于未知版本回退。
 
 `0.2.1-alpha.1` 的固定来源是 [tag `dsh-v0.2.1-alpha.1`](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.2.1-alpha.1)，提交 `5badb15009ae1756c3afe0ae0cef1faafc290ccc`。`alpha211` 独立继承 `rc202`，仅接受完整精确身份，不作为未知版本回退。核对目标提交的 Connection/Gateway、typed Remote、Session V4/history/control、Workspace、Job、userQuestions 和工具目录后，既有请求/事件形状保持可复用；Session list 的时间片和上传 receipt 的 Session 实例隔离是上游内部实现变化。web CLI 新增 `--public-url`，受管启动仍使用已验证的 loopback/port/`--no-open` 参数。
 
@@ -108,6 +120,24 @@ rc.2 与 rc.1 的 Connection / Gateway、全部 API Remote、Session V4、Accoun
 
 未发布主干的同版本开发构建不等于该 tag：已审计快照 `22ddee3792402c3e70ec5f86a63c3e3e895a2f60` 含 Gateway 访问控制、Typert resource resolver、Session summary/baseline、媒体与插件安装等后续变化，不能以 rc.3 标签套用未冻结的主干契约。精确支持范围针对上表固定发布来源；后续发布需重新比较自己的来源。
 
+### Rc.4 精确入口
+
+`0.2.1-rc.4` 固定到 [tag `dsh-v0.2.1-rc.4`](https://github.com/deepseek-ai/deepseek-harness/tree/504a01a9578abc2c6f1fb896b1dc322c9fe24f66)，提交 `504a01a9578abc2c6f1fb896b1dc322c9fe24f66`。与已固定的 rc.3 发布版相比，消费的 Gateway、Connection、typed Remote、Session V4、Workspace、Job、Schedule、Account、Plugin Manager、工具声明和 managed 启动源码均未变化。行为变化涉及 ACP stdout 日志、MCP resource 能力检查、浏览器 View 标签及相关浏览器文案。`rc214` 以独立精确身份继承已审查的 wire；安装默认不变。native 与人工验收证据独立报告，能力保持 `PARTIAL`。
+
+### 下一 minor 线的 alpha.2
+
+`0.2.2-alpha.2` 固定到 [tag `dsh-v0.2.2-alpha.2`](https://github.com/deepseek-ai/deepseek-harness/tree/f3803c96974ad4a94195fb97e5c637e9c2a3afe3)，提交 `f3803c96974ad4a94195fb97e5c637e9c2a3afe3`，与已固定的 rc.4 发布版单独比较。npm 历史和 Git tag 均未发布 `0.2.2-alpha.1`，不为该标签虚构身份。CLI 新增 Node **>=24.9.0** 要求；DSH 使用自己的启动环境，不改变扩展 Node 基线或引导安装默认。
+
+- [Session Controller](https://github.com/deepseek-ai/deepseek-harness/blob/f3803c96974ad4a94195fb97e5c637e9c2a3afe3/packages/api/session-controller/src/types.ts) 新增 passive state/event/projection 观察与 wait API；正在消费的 `follow` snapshot、control projection 和 V4 record 仍可用。实时订阅显式发送 `activate: true`，关闭预览时也保留；历史和模型读取保持 passive。保留的 `page` 别名仍接受固定 `throughSeq`；新增响应 cursor 不构成另一套客户端序号。summary 排除的 projection 是未知提示，不是权威空值。模型选择移至 Agent，但 wire 仍为 `{ lastUsed, next }`。
+- `session/attachment` 改为完整 `attachment` 引用，只校验存储完整性，不再检查 Session 日志归属。版本内仓储先从指定会话的 native 历史解析引用，覆盖用户/助手消息及已验证的工具结果图片，再请求字节；每次只保留一页，游标必须后退，固定期限和取消限制搜索，未引用 ID 在读取字节前拒绝。原有大小、MIME/签名及响应 ID 校验继续生效。
+- V4 codec 源码只修改 inherited delivery 的关系判定。精确发布 codec 与 prerelease Cordis peer 放在私有 codec workspace 中，锁文件保留历史 codec/peer 快照。Gateway resource resolver、pending event 元数据及可选压缩保留已核对的 root-client envelope、认证和取消，不冒充受限 Peer，也不跟随媒体跳转。
+- [User questions](https://github.com/deepseek-ai/deepseek-harness/blob/f3803c96974ad4a94195fb97e5c637e9c2a3afe3/packages/interaction/user-questions/src/types.ts) 新增阻塞 `intent: approval`。只有该精确入口把校验后的单个请求映射为既有固定单选流程：approve/reject/可选 always 标签必须匹配不同的已提供选项；保留 detail 与 RPC/会话身份，禁用自由文本和多选，不允许 wait claim。subject icon URL 与浏览器显示字典不外传。较早入口继续严格拒绝该 intent；定时问题保留既有生命周期和 Inbox admission 规则。
+- [Plugin Manager](https://github.com/deepseek-ai/deepseek-harness/blob/f3803c96974ad4a94195fb97e5c637e9c2a3afe3/packages/boot/plugin-manager/src/types.ts) 新增 `unsupported-platform`，仅在新 wire 中经 Domain、严格协议与双语界面投影；install/cancel/同 ID 恢复/remove/enable 保留已核对的契约。新增 inventory 字段、详情和版本更新 Remote 不代表扩展新增对应控件；私有包来源、诊断和 detail-file 地址不进入 Webview。
+- `llm/models-updated(provider)` 通过版本内事件映射使现有模型目录失效重读。名称、路由、推理与设置仍来自运行时；新增 badge 不改变路由。Schedule 批量删除已结束任务、工具原始值查看、实验推荐、OAR/Forge/worktree 视图及浏览器引用/多语言属于独立上游功能，不声明扩展已提供新增控制面。
+- companion 使用的工具注册、canonical output 和执行上下文字段保留；Registry 调用改为有序 batch。native 测试生产端使用目标版本 batch 形式，不改变 companion 准入，也不安装第二套 core 服务。可选 mods/Inspector 方法的 wire 保留；浏览器布局与内部服务变化不授予额外 Host 权限。
+
+精确 Adapter、增量 fixture、native 交互/附件探针及 managed VS Code 检查用于验证消费的接口。付费模型、真实 OAuth/账号、可选实验服务、远端操作系统和人工 Webview/无障碍验收独立完成；能力状态保持 `PARTIAL`。
+
 ### 未知版本
 
 对非空但未识别的标签，先进行公共握手，再按显式优先级只读 `probeCompatibility`。候选拒绝、超时或契约不匹配时尝试下一个；全部失败才拒绝连接。成功后保留真实版本标签、所选 Adapter 和兼容警告。只可复用经过证明安全的基础 wire：Session v2/v3/V4、`delivery`、turn-window、目录/交付事件和其他版本专属字段不能通过相近版本号猜测；未知 Remote 或事件安全降级为 unknown 或 `CAPABILITY_UNAVAILABLE`。畸形 SemVer-like 身份在 wire probe 前拒绝。
@@ -124,13 +154,21 @@ rc.2 与 rc.1 的 Connection / Gateway、全部 API Remote、Session V4、Accoun
 
 固定源码已核对 `dsh-v0.2.0-rc.2` / `639ed015397290b3745d163aafe02ffee4aa3f84`，以及 `dsh-v0.2.1-alpha.1` 至 `alpha.5`、`rc.1` 至 `rc.2` 的 Typert Service/Registry 和工具契约；关键来源为 `apps/cli/src/bin.ts`、`packages/typert/protocol/src/index.ts`、`packages/typert/registry/src/service.ts`、`packages/core/tools`。`rc.1` 为 `1600d8a1e140dcde43a1a0941940a0480712c011`，`rc.2` 为 `687f282e8625c6b8d11ff58211a90524be2e4317`。标准安装及元数据来源固定到该 `rc.2` 的 `packages/boot/plugin-manager/src/index.ts`、`packages/boot/app-boot/src/package-meta.ts`、`packages/host/plugin-inventory/src/index.ts`；旧版本已有真实工具链证据不等于新版安装流程已验证。引入 Principal 前的 Gateway 仅提供认证 Peer ID，新 Gateway 则另要求 owner principal；真实 Peer 仍用于绑定归属。
 
-协议 2 的 `vscodeEditorCompanion/describe`、`verifyHost`、`attach`、`poll`、`respond`、`detach` 均以 `request` 为命名参数；结果为严格 `status: ok/error` 联合。可选 `buildIdentity` 方法返回随包构建指纹，旧配套缺少它不改变原有 `describe` 形状。用户已选择安装且启用后，只对当前自有实例中已经安装的配套比较指纹并走标准更新；缺包仍要求显式安装，不自动替换外部连接。原生结果要求重启时才重连自有实例。F5 遵循相同安装选择，构建后以调试专用标记启动新实例并采用空闲端口，不改持久连接设置。协议 1 的 `vscodeEditorBridge` 方法保留，仅能力缺失时回退元数据。无法协商的能力不会被猜成成功，普通附件和手动编辑器上下文仍可使用。共享要求 loopback 及同侧随机文件挑战；内容访问限于当前 VS Code 窗口已打开且受信的根，按已有编辑器设置授权，不要求协议 2 会话目录与根相同。协议 1 回退保留目录关联校验。协议 2 可先绑定请求通道，缺少文件夹或信任时在首次工具调用提供原生入口，满足条件前不读取内容。远程环境按 Extension Host 执行侧处理，不把端口转发当成共享文件系统证明。
+协议 2 的 `vscodeEditorCompanion/describe`、`verifyHost`、`attach`、`poll`、`respond`、`detach` 均以 `request` 为命名参数；结果为严格 `status: ok/error` 联合。可选 `buildIdentity` 方法返回随包构建指纹，旧配套缺少它不改变原有 `describe` 形状。用户已选择安装且启用后，只对当前自有实例中已经安装的配套比较指纹并走标准更新；缺包仍要求显式安装，不自动替换外部连接。原生结果要求重启时才重连自有实例。F5 遵循相同安装选择，构建后以调试专用标记启动新实例并采用空闲端口，不改持久连接设置。协议 1 的 `vscodeEditorBridge` 方法保留，仅能力缺失时回退元数据。无法协商的能力不会被猜成成功，普通附件和手动编辑器上下文仍可使用。
+
+共享要求 loopback 及同侧随机文件挑战；内容访问限于当前 VS Code 窗口已打开且受信的根，按已有编辑器设置授权，不要求协议 2 会话目录与根相同。协议 1 回退保留目录关联校验。协议 2 可先绑定请求通道，缺少文件夹或信任时在首次工具调用提供原生入口，满足条件前不读取内容。远程环境按 Extension Host 执行侧处理，不把端口转发当成共享文件系统证明。
 
 新协议最多十六个独立会话绑定，每个最多四个请求；poll 最长一秒、lease 四十五秒、请求时限十秒。同一会话不允许第二个窗口重复绑定，新旧协议不重复授权。请求取消只释放对应请求；慢采集不阻塞续期，迟到回复不满足新请求。短暂传输失败退避恢复，连接/会话切换串行释放并重建授权；显式关闭持久化到工作区，重连不擅自打开。单个路径请求越界或不存在不撤销其余工具能力。
 
 设置页通过 Host 的 `editor.companion.status/configure/action` 查看安全状态、修改启用/允许编辑，及主动安装、重试、修复、重启、撤销或创建独立实例。偏好在已打开文件夹或工作区时保存到工作区设置；空窗口保存到用户设置，不要求先打开目录才能安装或关闭共享。输入采用严格 schema，状态不携带端点、绝对路径、授权标识或原始错误。安装及停止/重启仍仅操作扩展自有实例；独立实例恢复路径不停止原外部进程。
 
-工具读取未保存缓冲区、选区、诊断、语言服务与导航，或直接执行可撤销编辑。空选区返回空文本；文档读取每次最多 200 行、16,384 个 UTF-16 单元，选区保留 65,536 单元上限。分页以返回 range.end 的行和列作为下一次 startLine/startColumn，越过 EOF 的起点返回 invalid-range，结束行截到 EOF，不把末行冒充请求行；条目最多 200。草稿仅返回可验证的相对句柄，不返回原始 untitled URI。多根名称清理并去重，嵌套根按最长路径归属；真实路径允许根内符号链接，拒绝根外目标。重基只在已知旧版本且修改范围可明确区分时执行，有界快照不复制巨大文件；不确定冲突返回 stale，不能宣称写入成功。编辑按当前设置授权，不再逐次弹确认，原生 Undo 和独立撤回保留；编辑及独立撤回仅自动保存原本干净且未被并发输入改动的缓冲区，保留用户未保存内容，回执 saved 布尔值说明保存结果；原生写入回执丢失时保留撤回快照，无法确认的结果用 uncertain 明示，禁止直接重发。propose 接受 applied/uncertain/stale/cancelled 的不早于期望版本回执，旧 pending 仍须版本相等；未知回执 ID 返回 not-found，文件不存在与权限/IO 故障不再冒充越界，读版本错误不使用写操作文案。结果不明的编辑不得自动重发，需先读取核对。正文仅返回已授权 DSH；结构化实时/历史工具卡投影安全摘要。
+工具读取未保存缓冲区、选区、诊断、语言服务与导航，或直接执行可撤销编辑。空选区返回空文本；文档读取每次最多 200 行、16,384 个 UTF-16 单元，选区保留 65,536 单元上限。分页以返回 range.end 的行和列作为下一次 startLine/startColumn，越过 EOF 的起点返回 invalid-range，结束行截到 EOF，不把末行冒充请求行；条目最多 200。草稿仅返回可验证的相对句柄，不返回原始 untitled URI。
+
+多根名称清理并去重，嵌套根按最长路径归属；真实路径允许根内符号链接，拒绝根外目标。重基只在已知旧版本且修改范围可明确区分时执行，有界快照不复制巨大文件；不确定冲突返回 stale，不能宣称写入成功。
+
+编辑按当前设置授权，不再逐次弹确认，原生 Undo 和独立撤回保留；编辑及独立撤回仅自动保存原本干净且未被并发输入改动的缓冲区，保留用户未保存内容，回执 saved 布尔值说明保存结果；原生写入回执丢失时保留撤回快照，无法确认的结果用 uncertain 明示，禁止直接重发。
+
+propose 接受 applied/uncertain/stale/cancelled 的不早于期望版本回执，旧 pending 仍须版本相等；未知回执 ID 返回 not-found，文件不存在与权限/IO 故障不再冒充越界，读版本错误不使用写操作文案。结果不明的编辑不得自动重发，需先读取核对。正文仅返回已授权 DSH；结构化实时/历史工具卡投影安全摘要。
 
 完整目录与限制见[配套包说明](../packages/dsh-editor-bridge/README.md)。设置页在安装进行中或结果未知时保留独立取消入口，以原请求 ID 调用 `cancelInstall`，保留原安装响应以接收最终结果；原生确认前不宣称取消成功。未知结果通过 `waitForInstall` 查询，禁止重复 mutation。原生安装、等待及移除使用十分钟传输预算，调用方取消和连接关闭仍即时生效；普通请求保持原超时。标准安装或重启失败时仍保留聊天与手动上下文。
 
@@ -144,7 +182,9 @@ Session v2 的 `isSeeded`、event-only history 与 assistant stream 修订帧只
 
 读取 DSH 已恢复的 V4 会话时，客户端逐条处理可解释的记录，不重复执行完整持久日志的恢复与关系校验。未知或单条不可解释的记录降级为无正文、无控制语义的内部序号标记；无安全序号的记录不解释，不能因此拒绝其余可读历史。打开、翻页和实时跟随使用同一规则；任务、权限及其他状态继续使用原生 Controller 和投影，未知记录不触发执行操作。外层会话身份、游标和投影结构仍须校验；版本事件基线复用固定上游格式包导出的目录，不手工复制整张事件表。
 
-旧版历史同样按记录隔离不可解释的数据；识别事件时忽略未消费的新增 envelope 元数据。临时 assistant preview 不能阻断持久回复：预览帧不连续或基线畸形时先重订阅 `session/follow` 并采用其新基线继续流式（最多三次；首次立即，连续失败再退避 250–500ms），同一 attempt 的本地恢复只交付未发出的 chunk；新 follow 或不同 attempt 仍完整采用权威基线。仍失败才释放已收到的持久回复、退回 durable follow；缺失 `assistantStream` 基线表示宿主未接受 opt-in，不重试，等下一个 attempt 的 `start` 帧再恢复。任何路径都不伪造增量或正文。Remote 通知没有 durable sequence，Preset 变更经 Host 通知触发目录刷新，不包装为缺失序号的 `session/event`。共享 mux 保留消息大小、身份及 JSON 边界，能确定所属逻辑流的错误仅终止该流，不能关闭其他会话的流；未知通知不推断为审批或权限操作。
+旧版历史同样按记录隔离不可解释的数据；识别事件时忽略未消费的新增 envelope 元数据。临时 assistant preview 不能阻断持久回复：预览帧不连续或基线畸形时先重订阅 `session/follow` 并采用其新基线继续流式（最多三次；首次立即，连续失败再退避 250–500ms），同一 attempt 的本地恢复只交付未发出的 chunk；新 follow 或不同 attempt 仍完整采用权威基线。仍失败才释放已收到的持久回复、退回 durable follow；缺失 `assistantStream` 基线表示宿主未接受 opt-in，不重试，等下一个 attempt 的 `start` 帧再恢复。任何路径都不伪造增量或正文。
+
+Remote 通知没有 durable sequence，Preset 变更经 Host 通知触发目录刷新，不包装为缺失序号的 `session/event`。共享 mux 保留消息大小、身份及 JSON 边界，能确定所属逻辑流的错误仅终止该流，不能关闭其他会话的流；未知通知不推断为审批或权限操作。
 
 Control 基线随 wire 变化：早期 alpha 是 `queues`/`jobs`；`alpha162` 是 `jobs`/`projections.<sessionId>.values.inbox`，以 `next-turn`/`next-step` 和消息 ID 投影 Queue/Steer；`alpha171` 起只接受 `projections`，Job roster 从独立 `job/list` 的 whole-set rows 流读取。旧形状不得穿过新入口。Job follow 用绝对 UTF-8 字节偏移，首次数据帧可重放跨恢复游标的完整 chunk；客户端按字节且在码点边界裁掉已显示前缀。空文本的 lossy/gap 尾标志不能显示为输出。
 
@@ -152,7 +192,9 @@ Control 基线随 wire 变化：早期 alpha 是 `queues`/`jobs`；`alpha162` �
 
 ## 工具、命令与交互
 
-Host 截断正文时，协议以完整规范节点的内容指纹标记省略节点版本，不能以有损预览相等推断全文相等。相同正文的重放保持版本稳定，文本追加增量更新指纹；正文、思考及节点元数据变更使缓存失效。该标记只用于视图缓存，不替代原生序号、交互身份或授权；未携带版本的旧视图保持保守重读。临时分片缺口的重订阅合并在一秒窗口内，窗口内再次缺口必须保留一次到期恢复；取消订阅、关闭和新基线释放旧恢复任务。标题事件与快照均按持久化序号比较，较新的权威快照不得被旧 live 标题永久屏蔽。
+Host 截断正文时，协议以完整规范节点的内容指纹标记省略节点版本，不能以有损预览相等推断全文相等。相同正文的重放保持版本稳定，文本追加增量更新指纹；正文、思考及节点元数据变更使缓存失效。该标记只用于视图缓存，不替代原生序号、交互身份或授权；未携带版本的旧视图保持保守重读。
+
+可选 assistant preview 与持久日志有独立连续性语义，丢失暂态片段不能伪造为可重放的持久历史；恢复的合并、预算、退避及可见性策略属于[客户端架构](architecture.md)，不构成上游通用 credit 协议。标题事件与快照均按持久化序号比较，较新的权威快照不得被旧 live 标题永久屏蔽。
 
 `rc201` 及继承它的精确入口直接消费 [rc.1 的 tool-todo projection](https://github.com/deepseek-ai/deepseek-harness/blob/4878cdabd87d4041bdaff61d04c966883b9fd07a/packages/todo/tool-todo/src/index.ts)：原生 `todos` 是整值数组或 null；`todo/write` 替换，`turn/start` 清为 null，`turn/end` 保留清单。rc.2（`639ed015397290b3745d163aafe02ffee4aa3f84`）和 alpha.2（`d743267388641bc76f17c45ce8b4c231aed1d32c`）已核对同一行为。Adapter 只将 key、条目身份及 `in_progress` 映射为 Domain `todoList` / `in-progress`；完整基线缺少服务表示空当前列表，不从历史 Todo 卡恢复。历史卡仍属于对应回合；旧版未声明该 projection 时，由 Host 桥接结构化 Todo 整值，Webview 不再扫描历史。桥只采用最新尾部，裁切带明确标记；新版原生投影一旦可用就停止该桥的推导，不能用新版投影契约猜测旧版。
 
