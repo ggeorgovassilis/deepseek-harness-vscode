@@ -117,30 +117,30 @@ jobs:
         run: |
           node -e "require('node:fs').mkdirSync('artifacts', { recursive: true })"
           if [ "${{ matrix.target }}" = "universal" ]; then
-            pnpm --filter deepseek-harness-client exec vsce package \
+            pnpm --filter jabodsh exec vsce package \
               --no-dependencies \
               --no-gitHubIssueLinking \
               --allow-missing-repository \
-              --out "../../artifacts/deepseek-harness-vscode-${{ matrix.name }}.vsix"
+              --out "../../artifacts/jabodsh-${{ matrix.name }}.vsix"
           else
-            pnpm --filter deepseek-harness-client exec vsce package \
+            pnpm --filter jabodsh exec vsce package \
               --no-dependencies \
               --no-gitHubIssueLinking \
               --allow-missing-repository \
               --target "${{ matrix.target }}" \
-              --out "../../artifacts/deepseek-harness-vscode-${{ matrix.name }}.vsix"
+              --out "../../artifacts/jabodsh-${{ matrix.name }}.vsix"
           fi
 
       - name: Record universal VSIX digest
         if: matrix.target == 'universal'
         shell: bash
-        run: sha256sum artifacts/deepseek-harness-vscode-universal.vsix | tee artifacts/SHA256SUMS
+        run: sha256sum artifacts/jabodsh-universal.vsix | tee artifacts/SHA256SUMS
 
       - name: Upload platform VSIX
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: vsix-${{ matrix.name }}
-          path: artifacts/deepseek-harness-vscode-${{ matrix.name }}.vsix
+          path: artifacts/jabodsh-${{ matrix.name }}.vsix
           if-no-files-found: error
           retention-days: 14
 
@@ -180,29 +180,45 @@ jobs:
       - name: Attest universal VSIX provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
-          subject-path: artifacts/deepseek-harness-vscode-universal.vsix
+          subject-path: artifacts/jabodsh-universal.vsix
 
   publish:
     name: Publish to Visual Studio Marketplace
     concurrency:
       group: marketplace-publish
       cancel-in-progress: false
-    # Marketplace publishing requires an explicit manual opt-in, including for tagged releases.
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_marketplace == true }}
+    # Stable tags publish automatically; a main-only dispatch supports recovery.
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')) || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_marketplace == true) }}
     needs: [package, attest]
     runs-on: ubuntu-24.04
     timeout-minutes: 25
-    # Before enabling uploads, configure reviewers/ref rules on this environment,
-    # move VSCE_PAT into it, and remove the repository-level secret. GitHub creates
-    # missing environments without protection; this declaration cannot enforce setup.
+    # Match this environment in Jabofish's Trusted Publishing policy. Restrict its
+    # deployment refs to main and v* tags; OIDC replaces the previous PAT secret.
     environment: marketplace
     permissions:
       contents: read
+      id-token: write
     steps:
       - name: Check out source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Verify publishing ref
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Marketplace publishing requires a stable version tag."
+              exit 1
+            fi
+            git fetch --no-tags origin main:refs/remotes/origin/main
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+              echo "::error::The release commit must belong to main."
+              exit 1
+            fi
+          fi
 
       - name: Set up pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -216,7 +232,7 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        # The credentialed runner must not execute dependency lifecycle scripts.
+        # The publishing runner must not execute dependency lifecycle scripts.
         run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Download universal VSIX
@@ -234,19 +250,8 @@ jobs:
       - name: Verify universal VSIX digest
         run: sha256sum -c artifacts/SHA256SUMS
 
-      - name: Check Marketplace credential
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: |
-          if [ -z "$VSCE_PAT" ]; then
-            echo "::error::Marketplace secret VSCE_PAT is required for publishing."
-            exit 1
-          fi
-
       - name: Publish extension
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: pnpm --filter deepseek-harness-client exec node ../../scripts/publish-marketplace.cjs
+        run: pnpm --filter jabodsh exec node ../../scripts/publish-marketplace.cjs
 
   release:
     name: Create GitHub Release
@@ -302,6 +307,6 @@ jobs:
           else
             gh release create "$TAG" artifacts/*.vsix \
               --repo "${GITHUB_REPOSITORY}" \
-              --title "DeepSeek Harness VS Code $TAG" \
+              --title "JaboDSH $TAG" \
               --notes-file artifacts/release-notes.md
           fi

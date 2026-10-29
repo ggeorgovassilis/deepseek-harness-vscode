@@ -1,4 +1,6 @@
 {
+  "timeline.activity.showAll": "显示全部活动",
+  "timeline.activity.showRecent": "只显示最近活动",
   "settings.activityPresentation.label": "过程显示",
   "settings.activityPresentation.hint": "安静模式在运行时保持思考和工具摘要稳定，完成或主动展开后显示详情。回答仍实时输出。自动模式跟随 VS Code 读屏模式。此偏好保存在本地。",
   "settings.activityPresentation.auto": "自动（跟随读屏模式）",
@@ -1376,7 +1378,7 @@
   "app.error.imageType": "{name} 使用了此 DSH 主机不接受的图片类型。",
   "app.error.imageTooLarge": "{name} 超过 DSH 图片大小限制 {size}。",
   "app.error.imageTotalSize": "图片总大小超过 DSH 的 {size} 图片上限。",
-  "errorBoundary.title": "DeepSeek Harness 视图加载失败",
+  "errorBoundary.title": "JaboDSH 视图加载失败",
   "errorBoundary.description": "可以重新加载视图，不会停止 DSH。",
   "errorBoundary.reload": "重新加载视图",
   "goals.title": "目标",
