@@ -19,12 +19,15 @@ import type { ScheduleSessionLink } from './session-link.js'
 import type { SchedulePanelProps } from './SchedulePanel.js'
 
 interface ScheduleDetailProps {
+  readonly runSelected: () => void
+  readonly toggleSelected: () => void
   readonly props: SchedulePanelProps
   readonly t: Translate
   readonly locale: Locale
   readonly labelId: string
   readonly selected: ScheduleCatalogEntry
   readonly selectedLinkedSession: ScheduleSessionLink | undefined
+  readonly selectedLinkedSessionId: string | undefined
   readonly moreActionsTriggerRef: RefObject<HTMLButtonElement | null>
   readonly moreActionsOpen: boolean
   readonly setMoreActionsOpen: Dispatch<SetStateAction<boolean>>
@@ -61,12 +64,15 @@ interface ScheduleDetailProps {
 
 export function ScheduleDetail(input: ScheduleDetailProps): ReactElement {
   const {
+    runSelected,
+    toggleSelected,
     props,
     t,
     locale,
     labelId,
     selected,
     selectedLinkedSession,
+    selectedLinkedSessionId,
     moreActionsTriggerRef,
     moreActionsOpen,
     setMoreActionsOpen,
@@ -119,15 +125,23 @@ export function ScheduleDetail(input: ScheduleDetailProps): ReactElement {
                   : undefined
               }
               onClick={() => {
-                if (props.getLinkedSession(selected.sessionId).status === 'available')
-                  props.onOpenLinkedSession(selected.sessionId)
+                if (
+                  selectedLinkedSessionId !== undefined &&
+                  props.getLinkedSession(selectedLinkedSessionId).status === 'available'
+                )
+                  props.onOpenLinkedSession(selectedLinkedSessionId)
               }}
             >
               {t('schedules.linkedSession.label', {
                 title:
                   selectedLinkedSession?.status === 'available'
                     ? selectedLinkedSession.title
-                    : selected.sessionId,
+                    : (selectedLinkedSessionId ??
+                      t(
+                        selected.target?.kind === 'new'
+                          ? 'schedules.target.new'
+                          : 'schedules.target.new_once',
+                      )),
               })}
             </button>
             {selectedLinkedSession !== undefined && selectedLinkedSession.status !== 'available' ? (
@@ -158,6 +172,30 @@ export function ScheduleDetail(input: ScheduleDetailProps): ReactElement {
                 role="group"
                 aria-label={t('schedules.moreActions')}
               >
+                {selected.target !== undefined ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={busy || catalogStatus !== 'ready' || !selectedInCatalog}
+                      onClick={() => {
+                        setMoreActionsOpen(false)
+                        runSelected()
+                      }}
+                    >
+                      {t('schedules.run.now')}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy || catalogStatus !== 'ready' || !selectedInCatalog}
+                      onClick={() => {
+                        setMoreActionsOpen(false)
+                        toggleSelected()
+                      }}
+                    >
+                      {t(selected.status === 'active' ? 'schedules.pause' : 'schedules.resume')}
+                    </button>
+                  </>
+                ) : null}
                 <button
                   type="button"
                   disabled={busy || catalogStatus === 'loading' || !selectedInCatalog}
@@ -268,11 +306,31 @@ export function ScheduleDetail(input: ScheduleDetailProps): ReactElement {
         hidden={tab !== 'rule'}
       >
         {editing && draft !== undefined ? (
-          <form className="dsh-schedule-panel__editor" onSubmit={submitEdit}>
+          <form
+            className="dsh-schedule-panel__editor"
+            onSubmit={submitEdit}
+            onKeyDown={(event) => {
+              if (
+                event.key === 'Escape' &&
+                !event.defaultPrevented &&
+                !busy &&
+                !event.nativeEvent.isComposing &&
+                event.nativeEvent.keyCode !== 229
+              ) {
+                event.preventDefault()
+                event.stopPropagation()
+                setEditState({ editing: false })
+                setOperationError(undefined)
+              }
+            }}
+          >
             <fieldset
               className="dsh-schedule-panel__editor-fields"
               disabled={
-                busy || catalogStatus === 'loading' || !selectedInCatalog || selected.status !== 'active'
+                busy ||
+                catalogStatus === 'loading' ||
+                !selectedInCatalog ||
+                (selected.status !== 'active' && selected.target === undefined)
               }
             >
               <label>
@@ -291,6 +349,21 @@ export function ScheduleDetail(input: ScheduleDetailProps): ReactElement {
                   required
                   rows={5}
                   onChange={(event) => patchEditDraft({ prompt: event.currentTarget.value })}
+                  onKeyDown={(event) => {
+                    if (
+                      event.key === 'Enter' &&
+                      (event.ctrlKey || event.metaKey) &&
+                      !event.repeat &&
+                      !event.shiftKey &&
+                      !event.altKey &&
+                      !busy &&
+                      !event.nativeEvent.isComposing &&
+                      event.nativeEvent.keyCode !== 229
+                    ) {
+                      event.preventDefault()
+                      event.currentTarget.form?.requestSubmit()
+                    }
+                  }}
                 />
               </label>
               <label>
@@ -303,10 +376,26 @@ export function ScheduleDetail(input: ScheduleDetailProps): ReactElement {
                   ariaLabel={t('schedules.field.timing')}
                   title={t('schedules.field.timing')}
                   value={draft.timing}
-                  options={timingChoices(EDIT_TIMINGS, t)}
+                  options={timingChoices(
+                    selected.target === undefined
+                      ? EDIT_TIMINGS.filter((value) => value !== 'rrule')
+                      : EDIT_TIMINGS,
+                    t,
+                  )}
                   onChange={(value) => patchEditDraft({ timing: value as TimingChoice })}
                 />
               </label>
+              {draft.timing === 'rrule' ? (
+                <label>
+                  <span>{t('schedules.kind.rrule')}</span>
+                  <textarea
+                    value={draft.rrule ?? ''}
+                    rows={4}
+                    maxLength={64_000}
+                    onChange={(event) => patchEditDraft({ rrule: event.target.value })}
+                  />
+                </label>
+              ) : null}
               {draft.timing === 'at' ? (
                 <div className="dsh-schedule-panel__timing-fields">
                   <label>
@@ -437,7 +526,7 @@ export function ScheduleDetail(input: ScheduleDetailProps): ReactElement {
                     busy ||
                     catalogStatus !== 'ready' ||
                     !selectedInCatalog ||
-                    selected.status !== 'active' ||
+                    (selected.status !== 'active' && selected.target === undefined) ||
                     draft.title.trim() === '' ||
                     draft.title.trim().length > 120 ||
                     draft.prompt.trim() === '' ||
@@ -491,7 +580,10 @@ export function ScheduleDetail(input: ScheduleDetailProps): ReactElement {
                 type="button"
                 className="dsh-schedule-panel__primary"
                 disabled={
-                  busy || catalogStatus === 'loading' || !selectedInCatalog || selected.status !== 'active'
+                  busy ||
+                  catalogStatus === 'loading' ||
+                  !selectedInCatalog ||
+                  (selected.status !== 'active' && selected.target === undefined)
                 }
                 onClick={beginEdit}
               >

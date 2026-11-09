@@ -38,10 +38,9 @@ import {
   type ArchiveFilter,
   type RenameTarget,
   type SessionListProjectionInput,
-  type SessionSorting,
-  type WorkspaceDisplay,
 } from './session-drawer-model.js'
 import { useSessionContentSearch } from './useSessionContentSearch.js'
+import { readSessionListPreferences, rememberSessionListPreferences } from './session-list-preferences.js'
 
 export interface SessionDrawerProps {
   readonly permissions?: readonly PermissionRequest[]
@@ -95,8 +94,13 @@ export const SessionDrawer = memo(function SessionDrawer(props: SessionDrawerPro
   const [internalOpen, setInternalOpen] = useState(false)
   const [removingSessionId, setRemovingSessionId] = useState<string>()
   const [searchQuery, setSearchQuery] = useState('')
-  const [sorting, setSorting] = useState<SessionSorting>('manual')
-  const [workspaceDisplay, setWorkspaceDisplay] = useState<WorkspaceDisplay>('current')
+  const [listPreferences, setListPreferences] = useState(readSessionListPreferences)
+  const { sorting, workspaceDisplay } = listPreferences
+  const changeListPreferences = (change: Partial<typeof listPreferences>): void => {
+    const next = { ...listPreferences, ...change }
+    rememberSessionListPreferences(next)
+    setListPreferences(next)
+  }
   const [archiveFilter, setArchiveFilter] = useState<ArchiveFilter>('hide')
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>()
   const [renameTarget, setRenameTarget] = useState<RenameTarget>()
@@ -115,6 +119,8 @@ export const SessionDrawer = memo(function SessionDrawer(props: SessionDrawerPro
   const [mutationBusy, setMutationBusy] = useState(false)
   const renameInputRef = useRef<HTMLInputElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const searchComposingRef = useRef(false)
   const panelRef = useRef<HTMLDivElement>(null)
   const renameDialogRef = useRef<HTMLFormElement>(null)
   const removeDialogRef = useRef<HTMLDivElement>(null)
@@ -129,6 +135,15 @@ export const SessionDrawer = memo(function SessionDrawer(props: SessionDrawerPro
   if (dockState.requested !== props.open)
     setDockState({ requested: props.open, open: props.open === true || dockState.open })
   const open = docked ? props.open === true || dockState.open : (props.open ?? internalOpen)
+  useEffect(() => {
+    // A closed input may never receive compositionend from the browser.
+    searchComposingRef.current = false
+    // A persistent list must not take focus when the conversation mounts.
+    // A floating list or an explicit Host open request is ready for typing.
+    if (!open || (docked && props.open !== true)) return
+    searchInputRef.current?.focus({ preventScroll: true })
+    searchInputRef.current?.select()
+  }, [docked, open, props.open])
   const showTrigger = props.showTrigger !== false
   const setOpen = (next: boolean | ((current: boolean) => boolean)): void => {
     const resolved = typeof next === 'function' ? next(open) : next
@@ -156,7 +171,11 @@ export const SessionDrawer = memo(function SessionDrawer(props: SessionDrawerPro
     visibleWorkspaces[0]
   const selectedWorkspaceKey = selectedWorkspace?.id
   const trimmedSearchQuery = searchQuery.trim()
-  const { contentSearch, unavailable: contentSearchUnavailable } = useSessionContentSearch({
+  const {
+    contentSearch,
+    unavailable: contentSearchUnavailable,
+    pending: contentSearchPending,
+  } = useSessionContentSearch({
     open,
     query: trimmedSearchQuery,
     archiveFilter,
@@ -352,18 +371,49 @@ export const SessionDrawer = memo(function SessionDrawer(props: SessionDrawerPro
    * the list unchanged, so without a report the drag is indistinguishable from
    * a no-op.
    */
-  const moveSession = (workspaceId: string, sessionId: string, beforeSessionId: string): void => {
+  const moveSession = (workspaceId: string, sessionId: string, targetSessionId: string): void => {
+    if (sorting !== 'manual' || mutationBusy || removingSessionId !== undefined) return
+    const workspace = props.workspaces.find((item) => item.id === workspaceId)
+    if (workspace === undefined) return
+    const members = workspaceSessions(workspace)
+    const sourceSession = members.find((item) => item.id === sessionId)
+    const targetSession = members.find((item) => item.id === targetSessionId)
+    if (
+      sourceSession === undefined ||
+      targetSession === undefined ||
+      sourceSession.blank ||
+      targetSession.blank
+    )
+      return
+    // Preserve native members whose summaries have not loaded, too. Summaries
+    // alone cannot distinguish the last visible row from the workspace tail.
+    const ordered = [...new Set([...(workspace.sessionIds ?? []), ...members.map((item) => item.id)])]
+    // A downward row drop belongs after the target; inserting before it would
+    // leave adjacent rows unchanged and make reaching the end impossible.
+    const source = ordered.indexOf(sessionId)
+    const target = ordered.indexOf(targetSessionId)
+    if (source === target) return
+    const beforeSessionId = source < target ? ordered[target + 1] : targetSessionId
     setMoveError(undefined)
-    void props.onMoveSession(workspaceId, sessionId, beforeSessionId).catch((reason: unknown) => {
-      setMoveError(reason instanceof Error ? reason.message : t('sessions.moveFailed'))
-    })
+    setMutationBusy(true)
+    void props
+      .onMoveSession(workspaceId, sessionId, beforeSessionId)
+      .catch((reason: unknown) => {
+        setMoveError(reason instanceof Error ? reason.message : t('sessions.moveFailed'))
+      })
+      .finally(() => setMutationBusy(false))
   }
 
   const moveWorkspace = (workspaceId: string, beforeWorkspaceId: string): void => {
+    if (sorting !== 'manual' || mutationBusy || removingSessionId !== undefined) return
     setMoveError(undefined)
-    void props.onMoveWorkspace(workspaceId, beforeWorkspaceId).catch((reason: unknown) => {
-      setMoveError(reason instanceof Error ? reason.message : t('sessions.moveFailed'))
-    })
+    setMutationBusy(true)
+    void props
+      .onMoveWorkspace(workspaceId, beforeWorkspaceId)
+      .catch((reason: unknown) => {
+        setMoveError(reason instanceof Error ? reason.message : t('sessions.moveFailed'))
+      })
+      .finally(() => setMutationBusy(false))
   }
 
   const startRename = (target: RenameTarget): void => {
@@ -465,7 +515,7 @@ export const SessionDrawer = memo(function SessionDrawer(props: SessionDrawerPro
       busy={mutationBusy}
       onSelect={(target) => {
         setSelectedWorkspaceId(target.id)
-        setWorkspaceDisplay('current')
+        changeListPreferences({ workspaceDisplay: 'current' })
       }}
       onRename={(target, trigger) => {
         dialogTriggerRef.current = trigger
@@ -633,7 +683,9 @@ export const SessionDrawer = memo(function SessionDrawer(props: SessionDrawerPro
                     : t('sessions.groupWorkspacesTitle')
                 }
                 onClick={() =>
-                  setWorkspaceDisplay((current) => (current === 'current' ? 'grouped' : 'current'))
+                  changeListPreferences({
+                    workspaceDisplay: workspaceDisplay === 'current' ? 'grouped' : 'current',
+                  })
                 }
               >
                 <Icon name="folder" />
@@ -643,7 +695,9 @@ export const SessionDrawer = memo(function SessionDrawer(props: SessionDrawerPro
                 type="button"
                 aria-label={sorting === 'manual' ? t('sessions.sortUpdated') : t('sessions.sortManual')}
                 title={sorting === 'manual' ? t('sessions.sortUpdatedTitle') : t('sessions.sortManualTitle')}
-                onClick={() => setSorting((current) => (current === 'manual' ? 'updated' : 'manual'))}
+                onClick={() =>
+                  changeListPreferences({ sorting: sorting === 'manual' ? 'updated' : 'manual' })
+                }
               >
                 <Icon name={sorting === 'manual' ? 'list' : 'clock'} />
               </button>
@@ -666,12 +720,53 @@ export const SessionDrawer = memo(function SessionDrawer(props: SessionDrawerPro
           </header>
           <div className="dsh-session-switcher__search">
             <input
+              ref={searchInputRef}
               type="search"
               value={searchQuery}
               placeholder={t('sessions.search')}
               aria-label={t('sessions.searchAria')}
+              title={t('sessions.searchHint')}
               maxLength={SEARCH_QUERY_MAX_CODE_UNITS}
+              onCompositionStart={() => {
+                searchComposingRef.current = true
+              }}
+              onCompositionEnd={() => {
+                searchComposingRef.current = false
+              }}
               onChange={(event) => setSearchQuery(sanitizeSearchQuery(event.target.value))}
+              onKeyDown={(event) => {
+                if (
+                  event.key !== 'Enter' ||
+                  event.repeat ||
+                  event.shiftKey ||
+                  event.ctrlKey ||
+                  event.metaKey ||
+                  event.altKey ||
+                  searchComposingRef.current ||
+                  event.nativeEvent.isComposing ||
+                  event.nativeEvent.keyCode === 229 ||
+                  query === '' ||
+                  contentSearchPending ||
+                  archiveFilter === 'archived' ||
+                  contentSearchHasMore ||
+                  (archiveFilter !== 'hide' && archivedOpen && filteredArchivedSessions.length > 0) ||
+                  mutationBusy ||
+                  removingSessionId !== undefined
+                )
+                  return
+                const matches = new Map(
+                  [
+                    ...currentWorkspaceSessions,
+                    ...matchedWorkspaceGroups.flatMap((group) => group.sessions),
+                    ...contentSearchResults,
+                  ].map((session) => [session.id, session]),
+                )
+                if (matches.size !== 1) return
+                const only = matches.values().next().value
+                if (only === undefined) return
+                event.preventDefault()
+                openSession(only)
+              }}
             />
             <SelectMenu
               className="dsh-session-switcher__archive-filter"

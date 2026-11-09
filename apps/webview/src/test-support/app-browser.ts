@@ -19,6 +19,7 @@ import {
 } from '@dsh-vscode/webview-protocol'
 import type { VsCodeApi } from '../vscode-api.js'
 import { translate } from '../i18n.js'
+import { writeClipboard } from '../features/chat/clipboard.js'
 
 // Only the external Host boundary is controlled here. The entrypoint below
 // starts the production App, Store, protocol client, providers and styles.
@@ -54,8 +55,9 @@ let sessions: SessionSummary[] = ['daily-a', 'daily-b', 'daily-c'].map((id, i) =
   blank: false,
   status: 'idle',
   createdAt: clock,
-  updatedAt: clock,
+  updatedAt: owner.includes('session-list-preferences') ? `2026-10-${20 + i}T00:00:00Z` : clock,
 }))
+let archivedSessions: SessionSummary[] = []
 const nodes = new Map<string, readonly TimelineNode[]>(
   sessions.map((session) => [
     session.id,
@@ -72,6 +74,7 @@ const nodes = new Map<string, readonly TimelineNode[]>(
     ],
   ]),
 )
+let sessionOrder = sessions.map((session) => session.id)
 const revisions = new Map<string, number>()
 type WireConfiguration = Extract<WebviewRequest, { type: 'session.configure' }>['payload']['configuration']
 const configurations = new Map<string, WireConfiguration>()
@@ -160,6 +163,7 @@ function route(request: WebviewRequest): unknown {
         kind: 'connected',
         backendInstanceId: 'daily-fixture',
         connectionGeneration: 1,
+        sessionRestore: true,
       })
       return {}
     case 'surface.titlebarLayout':
@@ -169,6 +173,15 @@ function route(request: WebviewRequest): unknown {
     case 'connection.retry':
       event('connection.snapshot', { kind: 'connected' })
       return {}
+    case 'diagnostics.snapshot':
+      return {
+        extensionVersion: '0.1.11',
+        dshVersion: '0.2.1-rc.5',
+        state: 'connected',
+        endpointKind: 'managed',
+        canReconnect: true,
+        recentEvents: [],
+      }
     case 'workspace.list':
       return [
         {
@@ -176,20 +189,54 @@ function route(request: WebviewRequest): unknown {
           name: 'Daily workspace',
           createdAt: clock,
           updatedAt: clock,
-          sessionIds: sessions.map((session) => session.id),
+          sessionIds: sessionOrder,
           sessionCount: sessions.length,
         },
       ]
     case 'session.list':
       return {
         items: request.payload.archived
-          ? []
+          ? archivedSessions
           : request.payload.search === undefined
             ? sessions
             : sessions.filter((session) =>
                 session.title.toLowerCase().includes(request.payload.search?.toLowerCase() ?? ''),
               ),
       }
+    case 'session.archive': {
+      const { sessionId, archived } = request.payload
+      if (archived) {
+        const target = sessions.find((session) => session.id === sessionId)
+        if (target !== undefined) {
+          sessions = sessions.filter((session) => session.id !== sessionId)
+          sessionOrder = sessionOrder.filter((id) => id !== sessionId)
+          archivedSessions = [...archivedSessions, target]
+        }
+        return {}
+      }
+      const restored = archivedSessions.find((session) => session.id === sessionId)
+      if (restored !== undefined) {
+        archivedSessions = archivedSessions.filter((session) => session.id !== sessionId)
+        sessions = [...sessions, restored]
+        sessionOrder = [...sessionOrder, sessionId]
+      }
+      return {}
+    }
+    case 'session.move': {
+      if (
+        request.payload.workspaceId !== 'daily-workspace' ||
+        !sessionOrder.includes(request.payload.sessionId)
+      )
+        throw new Error('Unknown fixture session membership')
+      const remaining = sessionOrder.filter((id) => id !== request.payload.sessionId)
+      const index =
+        request.payload.beforeSessionId === undefined
+          ? remaining.length
+          : remaining.indexOf(request.payload.beforeSessionId)
+      if (index < 0) throw new Error('Unknown fixture session anchor')
+      sessionOrder = [...remaining.slice(0, index), request.payload.sessionId, ...remaining.slice(index)]
+      return {}
+    }
     case 'session.rename':
       sessions = sessions.map((session) =>
         session.id === request.payload.sessionId ? { ...session, title: request.payload.title } : session,
@@ -233,6 +280,7 @@ function route(request: WebviewRequest): unknown {
         updatedAt: clock,
       }
       sessions.push(summary)
+      sessionOrder.push(summary.id)
       configurations.set(summary.id, request.payload.configuration)
       return { ...summary, configuration: request.payload.configuration, transcript: transcript(summary.id) }
     }
@@ -455,6 +503,29 @@ function target(value: Target): HTMLElement {
   return element
 }
 const scenario = {
+  reasoning(markdown: string, streaming: boolean): void {
+    publish(lastOpened, [
+      ...(nodes.get(lastOpened) ?? []).filter((node) => node.id !== 'daily-signed-reasoning'),
+      { kind: 'reasoning', id: 'daily-signed-reasoning', markdown, streaming },
+    ])
+    status(lastOpened, streaming ? 'running' : 'idle')
+  },
+  async legacyCopy(text: string): Promise<boolean> {
+    const previous = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: () =>
+          Promise.reject(new DOMException('Fixture clipboard policy denial', 'NotAllowedError')),
+      },
+    })
+    try {
+      return await writeClipboard(text)
+    } finally {
+      if (previous === undefined) Reflect.deleteProperty(navigator, 'clipboard')
+      else Object.defineProperty(navigator, 'clipboard', previous)
+    }
+  },
   label: (key: string, params?: Readonly<Record<string, string | number>>): string => translate(key, params),
   async point(value: Target): Promise<{ x: number; y: number }> {
     let element = target(value)
@@ -499,6 +570,9 @@ const scenario = {
       (node) => node.getAttribute('aria-label') === translate('composer.prompt'),
     )
     return {
+      sessionTitles: [...document.querySelectorAll<HTMLElement>('.dsh-session-item__button strong')]
+        .filter(visible)
+        .map((node) => node.innerText),
       text: document.body.innerText,
       prompt: prompt?.value,
       timeline: document.querySelector(`[aria-label="${translate('timeline.aria')}"]`)?.textContent,
@@ -531,6 +605,27 @@ const scenario = {
       })),
     }
   },
+  dragSession(source: string, destination: string): void {
+    const row = (title: string): HTMLElement => {
+      const label = [...document.querySelectorAll<HTMLElement>('.dsh-session-item__button strong')].find(
+        (node) => visible(node) && node.innerText === title,
+      )
+      const item = label?.closest('li')
+      if (item === undefined || item === null) throw new Error(`Missing conversation: ${title}`)
+      return item
+    }
+    const from = row(source),
+      to = row(destination)
+    const dataTransfer = new DataTransfer()
+    const dispatch = (element: HTMLElement, type: string): boolean =>
+      element.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer }))
+    if (!dispatch(from, 'dragstart')) return
+    if (!dispatch(to, 'dragover')) dispatch(to, 'drop')
+    dispatch(from, 'dragend')
+  },
+  toggleSessions(): void {
+    event('ui.sessions.toggle', {})
+  },
   failNext(type: string): void {
     failures.add(type)
   },
@@ -560,7 +655,11 @@ const scenario = {
     holds.clear()
     for (const request of waiting.values()) {
       waiting.delete(request.requestId)
-      reply(request, route(request))
+      try {
+        reply(request, route(request))
+      } catch {
+        reply(request, undefined, true)
+      }
     }
   },
   status(value: SessionSummary['status']): void {

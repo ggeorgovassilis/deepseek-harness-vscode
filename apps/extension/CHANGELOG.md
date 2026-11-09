@@ -6,6 +6,31 @@ Release entries describe behaviour at that release. `Unreleased` lists changes a
 
 ## Unreleased
 
+## 0.4.7
+
+- Adds exact DSH `0.2.2-rc.1` support, retaining the source-verified alpha.3 batched Session projections, native scheduled tasks and scoped tool images. Keeps older release identities and the guided-install default; newer unverified versions do not inherit this contract.
+- 适配 DSH `0.2.2-rc.1`，沿用经源码核对的 alpha.3 批量会话投影、原生定时任务和受限工具图片读取。保留旧版独立身份及引导安装默认；未核对的新版本不会沿用此契约。
+
+## 0.4.6
+
+- Adds exact DSH `0.2.2-alpha.3` support for batched Session projections and native scheduled tasks. Create one-time or recurring tasks with RRULE and workspace-scoped targets; run, pause, resume, edit and delete with revision conflict handling. Older runtimes retain their Schedule workflow and the guided-install default is unchanged.
+- Preserves task selection after first delivery and successful write receipts when workspace trust changes during a reply. Publishes complete companion cache archives atomically so concurrent installs cannot read unfinished files.
+- Adds real VS Code screenshots and separate tool-inspection and follow-up walkthroughs to the README and Marketplace page, and refines the empty-conversation icon.
+
+## 0.4.5
+
+- Complete commands with Tab without executing them, recall complete authored prompts from the current conversation, and return input focus after explicit navigation, sending or removing attachments. Preserve IME input, modified shortcuts and conversation ownership.
+- 支持 Tab 补全命令而不执行、回看当前会话中的完整用户提示词，并在主动导航、发送或移除附件后回到输入框；保留输入法、组合快捷键及会话归属。
+- Remember session sorting/grouping, the settings tab and export format locally. Add archive Undo on supported runtimes, search shortcuts and keyboard controls for schedule, pricing, feedback and Todo surfaces.
+- 在本地记住会话排序与分组、设置页签和导出格式；为支持恢复的运行时增加归档撤销，并补齐搜索、定时任务、计费、反馈及 Todo 的键盘操作。
+- Add copy actions for approval commands, redacted diffs, reasoning, generated paths, search answers and failed open targets. Clipboard fallback restores focus and selection. Refresh open diagnostics without overlapping reads or stale writes, preserving action failures during background refresh; dismiss successful checkpoint notices while keeping partial-restore results visible.
+- 为审批命令、脱敏差异、思考正文、生成路径、搜索答案和打开失败的目标增加复制操作，兼容复制恢复焦点与选区；诊断打开时自动刷新，防止重叠读取与过期回写，并保留操作失败提示；检查点成功提示自动消失，部分恢复结果保持可见。
+
+- Adds an exact adapter for DSH `0.2.1-rc.5`, retaining separate `0.2.1-rc.4` and `0.2.2-alpha.2` identities and the guided-install default. Chat hides leading reasoning signatures during streaming and after completion; raw history remains available to the trajectory inspector.
+- 适配 DSH `0.2.1-rc.5`，保留 `0.2.1-rc.4`、`0.2.2-alpha.2` 的独立身份与引导安装默认。聊天中的流式与已完成思考均隐藏开头的签名元数据，轨迹检查仍保留原始历史。
+- Confirm Windows shutdown when `taskkill` races an exiting descendant: require the owned child's close event and a process-tree check covering pre-stop descendants. Residual processes or unavailable diagnostics still report failure.
+- 修复 Windows 子进程退出与 `taskkill` 交错时的停止误报：同时确认持有进程的关闭事件与停止前后进程树，覆盖父进程先退出的后代；存在残留或无法查询时仍报告失败。
+
 ## 0.4.4
 
 - Link installation instructions to the live JaboDSH Marketplace listing.
