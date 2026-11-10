@@ -10,5 +10,7 @@ apps/extension/media
 apps/extension/resources/editor-companion-runtime.mjs
 apps/extension/.vscodeignore
 pnpm-lock.yaml
+# Shell scripts have no Prettier parser.
+scripts/build-with-docker.sh
 DSH_VSCODE_IMPLEMENTATION_PLAN.md
 DSH_VSCODE_AGENT_FEATURE_IMPLEMENTATION_PLAN.md
