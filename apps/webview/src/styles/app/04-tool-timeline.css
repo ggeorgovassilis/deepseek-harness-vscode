@@ -217,7 +217,7 @@
   cursor: pointer;
 }
 
-.dsh-timeline__reasoning-toggle:hover,
+.dsh-timeline__reasoning-toggle:hover:not(:disabled),
 .dsh-timeline__reasoning-toggle:focus-visible {
   color: var(--dsh-text);
   background: var(--dsh-surface-hover);
@@ -230,6 +230,10 @@
   width: var(--dsh-icon-size-sm);
   height: var(--dsh-icon-size-sm);
   place-items: center;
+}
+
+.dsh-timeline__reasoning-toggle > .dsh-timeline__disclosure {
+  grid-column: 4;
 }
 
 .dsh-timeline__reasoning-icon {
@@ -277,7 +281,7 @@
   color: var(--dsh-muted);
 }
 
-.dsh-timeline__reasoning-copy:hover,
+.dsh-timeline__reasoning-copy:hover:not(:disabled),
 .dsh-timeline__reasoning-copy:focus-visible {
   color: var(--dsh-text);
 }
@@ -566,6 +570,11 @@
   color: var(--dsh-muted);
   background: var(--dsh-surface-raised);
   font-size: var(--dsh-font-size-xs);
+}
+
+.dsh-timeline__history-more > .dsh-timeline__history-more-button {
+  justify-content: center;
+  min-width: min(100%, 14em);
 }
 
 .dsh-timeline__activity-toggle {
