@@ -18,17 +18,24 @@ export const TimelineRow = memo(
   }): ReactElement {
     return (
       <>
-        {props.contentStatus === undefined ? null : (
-          <p role={props.contentStatus === 'retrying' ? 'alert' : 'status'}>
-            {props.context.t(
-              props.contentStatus === 'retrying' ? 'transcript.syncRetrying' : 'transcript.syncLoading',
-            )}
-          </p>
-        )}
         {props.node.kind === 'focused-turn' ? (
           <FocusedTurn node={props.node} context={props.context} />
         ) : (
           renderTimelineNode(props.node, props.context)
+        )}
+        {props.contentStatus === undefined ? null : (
+          <p
+            className={
+              props.contentStatus === 'retrying'
+                ? 'dsh-timeline__sync-status dsh-timeline__sync-status--retrying'
+                : 'dsh-timeline__sync-status'
+            }
+            role={props.contentStatus === 'retrying' ? 'alert' : 'status'}
+          >
+            {props.context.t(
+              props.contentStatus === 'retrying' ? 'transcript.syncRetrying' : 'transcript.syncLoading',
+            )}
+          </p>
         )}
       </>
     )
