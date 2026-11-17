@@ -8,13 +8,21 @@
 # image produces a VSIX that installs on any platform.
 #
 # Layout:
-#   - The repository source is bind-mounted read-write at /work.
+#   - The repository source is mounted read-only at /src and copied into an
+#     ephemeral writable working copy at /work. The build runs against that
+#     copy, so a compromised dependency or build script can write only to the
+#     throw-away copy — never to the host source tree, .git/hooks or this
+#     script. The copy is discarded with the container; the only host path the
+#     build writes to is artifacts/ (the VSIX output).
+#   - The container runs as the invoking (non-root) user, so every file it
+#     writes is already owned by the host user and no privileged `chown` pass is
+#     needed afterwards.
 #   - node_modules, the pnpm content-addressable store and the Corepack cache
 #     live in named Docker volumes. They are persistent and container-local, so
 #     Linux-native modules never clobber a host-side install, yet they remain
-#     inspectable by re-entering the image (see --shell).
-#   - The VSIX is written into the host's artifacts/ directory (a bind mount),
-#     then chowned back to the invoking user.
+#     inspectable by re-entering the image (see --shell). A one-time root
+#     container chowns those volumes (it mounts no source and no host paths).
+#   - The VSIX is written into the host's artifacts/ directory (a bind mount).
 #
 # Modes:
 #   build-with-docker.sh                build + package + install into VS Code
@@ -22,13 +30,14 @@
 #   build-with-docker.sh --shell        drop into a shell with source + deps mounted
 #   build-with-docker.sh --shell "cmd"  run one command in the build env (no TTY)
 #
-# The image is overridable (e.g. a digest-pinned image) via DSH_BUILD_IMAGE.
+# The image defaults to a digest-pinned `node:22-bookworm-slim`; override with
+# a different (still digest-pinned) image via DSH_BUILD_IMAGE.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-IMAGE="${DSH_BUILD_IMAGE:-node:22-bookworm-slim}"
+IMAGE="${DSH_BUILD_IMAGE:-node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee}"
 CONTAINER_NAME="${DSH_BUILD_CONTAINER:-dsh-extension-build}"
 VOLUME_NODE_MODULES="dsh-build-node-modules"
 VOLUME_PNPM_STORE="dsh-build-pnpm-store"
@@ -49,42 +58,80 @@ docker volume create "$VOLUME_NODE_MODULES" >/dev/null
 docker volume create "$VOLUME_PNPM_STORE" >/dev/null
 docker volume create "$VOLUME_COREPACK" >/dev/null
 
+# One-time setup: named volumes are created root-owned, so the non-root build
+# user cannot write to them. Chown them once (the build then reuses them).
+# This container is root but mounts only the three volumes — no source, no
+# host paths — so its blast radius is nil.
+docker run --rm \
+  -v "$VOLUME_NODE_MODULES:/node_modules" \
+  -v "$VOLUME_PNPM_STORE:/pnpm-store" \
+  -v "$VOLUME_COREPACK:/corepack" \
+  "$IMAGE" sh -c "chown -R $HOST_UID:$HOST_GID /node_modules /pnpm-store /corepack"
+
+# The VSIX output dir must exist on the host before the read-write bind mount,
+# otherwise Docker would create it root-owned.
+mkdir -p "$REPO_ROOT/artifacts"
+
 run_args=(
   --rm
   --name "$CONTAINER_NAME"
+  --user "$HOST_UID:$HOST_GID"
   -e "COREPACK_HOME=/corepack"
+  -e "HOME=/tmp"
+  # Non-interactive build: let pnpm reconcile the (possibly stale) named
+  # node_modules volume without prompting, as it would in CI.
+  -e "CI=true"
   -e "HOST_UID=$HOST_UID"
   -e "HOST_GID=$HOST_GID"
-  -v "$REPO_ROOT:/work"
+  # Ephemeral writable working copy (memory-backed, discarded with --rm),
+  # owned by the invoking user. The artifacts bind mount and node_modules
+  # volume are layered on top of it.
+  --tmpfs "/work:rw,size=2g,uid=$HOST_UID,gid=$HOST_GID,mode=0777"
+  -v "$REPO_ROOT:/src:ro"
+  -v "$REPO_ROOT/artifacts:/work/artifacts"
   -v "$VOLUME_NODE_MODULES:/work/node_modules"
   -v "$VOLUME_PNPM_STORE:/pnpm-store"
   -v "$VOLUME_COREPACK:/corepack"
   -w /work
 )
 
+# Copy the read-only source into the ephemeral writable working copy, skipping
+# the node_modules volume mount point, VCS metadata and the build outputs that
+# are regenerated anyway. The build then has free rein over /work without ever
+# touching /src.
+populate_work() {
+  (cd /src && tar \
+    --exclude='node_modules' \
+    --exclude='.git' \
+    --exclude='artifacts' \
+    --exclude='dist' \
+    --exclude='media' \
+    -cf - .) | (cd /work && tar -xf -)
+}
+
 build_steps() {
-  # Put a Corepack-delegating `pnpm` on PATH so the `pnpm --filter …` calls
-  # inside package.json scripts resolve (the extension uses the same shim trick
-  # on the host via node_modules/.bin/pnpm).
-  corepack enable
+  populate_work
+  # `corepack enable` symlinks into the image's root-owned /usr/local/bin, which
+  # the non-root user cannot do. Create a Corepack-delegating `pnpm` shim in a
+  # writable location instead, so the `pnpm --filter …` calls inside
+  # package.json scripts resolve (the extension uses the same shim trick on the
+  # host via node_modules/.bin/pnpm).
+  mkdir -p /tmp/bin
+  printf '#!/bin/sh\nexec corepack pnpm "$@"\n' > /tmp/bin/pnpm
+  chmod +x /tmp/bin/pnpm
+  export PATH="/tmp/bin:$PATH"
   # pnpm 11 defaults the content-addressable store to <project>/.pnpm-store;
   # pin it to the named volume so it stays container-local and inspectable
   # instead of polluting the bind-mounted source tree.
-  corepack pnpm install --frozen-lockfile --store-dir /pnpm-store
-  corepack pnpm package:vsix
-  # The bind mount is shared with the host. The container runs as root, so
-  # restore ownership of everything it wrote so the host user can manage it.
-  chown -R "$HOST_UID:$HOST_GID" \
-    /work/artifacts \
-    /work/apps/extension/dist \
-    /work/apps/extension/media 2>/dev/null || true
+  pnpm install --frozen-lockfile --store-dir /pnpm-store
+  pnpm package:vsix
 }
 
 case "$MODE" in
   build|--no-install|-n)
     docker run "${run_args[@]}" "$IMAGE" bash -lc '
       set -euo pipefail
-      '"$(declare -f build_steps)"'
+      '"$(declare -f populate_work build_steps)"'
       build_steps
     '
     ;;
@@ -93,9 +140,19 @@ case "$MODE" in
       # Non-interactive inspection: `--shell "ls node_modules/.pnpm"` runs the
       # given command inside the build environment and exits.
       shift
-      docker run "${run_args[@]}" "$IMAGE" bash -lc "$*"
+      docker run "${run_args[@]}" "$IMAGE" bash -lc '
+        set -euo pipefail
+        '"$(declare -f populate_work)"'
+        populate_work
+        '"$*"'
+      '
     else
-      docker run "${run_args[@]}" -it "$IMAGE" bash
+      docker run "${run_args[@]}" -it "$IMAGE" bash -lc '
+        set -euo pipefail
+        '"$(declare -f populate_work)"'
+        populate_work
+        exec bash
+      '
     fi
     ;;
   *)
