@@ -6,6 +6,26 @@ Release entries describe behaviour at that release. `Unreleased` lists changes a
 
 ## Unreleased
 
+## 0.4.9
+
+- Adds exact DSH `0.2.2-rc.3` support (`38a6a5c965aa99ab525161efb7cc5cf1fe62fced`) using the source-checked rc.2 Remote and Session V4 contracts. Discovers the optional DeepSeek chat importer from the Host; imported sessions use the existing history and export paths. ZIP exports retain the runtime's missing-attachment receipt. See the compatibility contract for validation scope.
+- 适配 DSH `0.2.2-rc.3`（`38a6a5c965aa99ab525161efb7cc5cf1fe62fced`），沿用经源码逐项核对的 rc.2 Remote 与 Session V4 契约。由 Host 发现可选的 DeepSeek 会话导入插件，导入的会话通过现有历史和导出路径读取，ZIP 导出保留运行时提供的缺失附件清单。验证范围见兼容契约。
+- Companion catalogue reads follow the configured RPC timeout (30 seconds by default), with a separate package-manager probe budget. Status reads coalesce only within the current connection and installation revision; disconnect/disposal cancels pending discovery and stale replies cannot replace current status. Client status/configuration requests allow the corresponding Host work to finish.
+- companion 目录读取遵循配置的 RPC 超时（默认 30 秒），包管理器探测使用独立预算。状态查询只在同一连接及安装状态代次内合并；断开或销毁时取消待处理发现，过期响应不能覆盖当前状态，客户端状态及配置请求的等待预算覆盖对应 Host 操作。
+- Keeps dropdowns open when clicking padding or disabled options, places dialog failures beside their actions without shifting the dialog, and stabilizes conversation controls. Preserves pagination ownership and the reading position while older messages load.
+- 点击下拉菜单留白或禁用选项时保持菜单打开，弹窗错误显示在操作旁且不引起弹窗位移，并修复会话操作控件。加载较早消息时保留分页请求归属和阅读位置。
+
+## 0.4.8
+
+- Adds exact DSH `0.2.2-rc.2` support (`ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c`): named subagent catalogs and direct controls, validated continuation/Team projections, account stream and notification migration, and expected-package installation checks. Preserves older exact adapters and the guided-install default. Authenticated account/model and independent VS Code acceptance remain partial.
+- 适配 DSH `0.2.2-rc.2`（`ddac96760b6edf8fa0fe17cbdcf0b512f4c12b2c`）：子代理命名目录与直接控制、继续执行/Team 投影校验、账号状态流与通知迁移、插件安装目标校验。保留旧版独立适配和引导安装默认；已认证账号/模型与独立 VS Code 验收仍未完成。
+
+- Stabilizes transcript layout, history navigation and attachment lifecycles. Queued image attachments show recognizable previews and names, while attachment loading, removal and session changes preserve ownership and cancellation.
+- 修复消息布局、历史导航与附件生命周期问题；队列图片附件展示可辨识的预览和名称，加载、移除及切换会话时保留归属与取消边界。
+
+- Hardens the extension trust boundary: connection endpoint, mode, attachment-port and auto-start settings are now machine-scoped (never overridable by workspace settings), the DSH install and version probes no longer inherit developer secrets from the environment, and runtime discovery only trusts executables that report a DSH-style version label. Thanks to [George Georgovassilis (@ggeorgovassilis)](https://github.com/ggeorgovassilis) for [PR #50](https://github.com/Jabofish/deepseek-harness-vscode/pull/50).
+- 强化扩展信任边界：连接端点、模式、附加端口与自动启动设置改为计算机级作用域（工作区设置不可覆盖）；DSH 安装与版本探测不再继承开发环境中的密钥；运行时发现仅信任输出 DSH 版本格式标签的可执行文件。感谢 [George Georgovassilis（@ggeorgovassilis）](https://github.com/ggeorgovassilis) 提交 [PR #50](https://github.com/Jabofish/deepseek-harness-vscode/pull/50)。
+
 ## 0.4.7
 
 - Adds exact DSH `0.2.2-rc.1` support, retaining the source-verified alpha.3 batched Session projections, native scheduled tasks and scoped tool images. Keeps older release identities and the guided-install default; newer unverified versions do not inherit this contract.

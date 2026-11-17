@@ -185,7 +185,15 @@ function renderNode(
           )}
         </details>
       )
-    case 'retry':
+    case 'retry': {
+      const retryLabel =
+        node.state === 'cancelled'
+          ? t('timeline.retryCancelled', { attempt: node.attempt })
+          : node.state === 'started'
+            ? t('timeline.retryStarted', { attempt: node.attempt })
+            : node.attempt > 1
+              ? t('timeline.retryingAttempt', { attempt: node.attempt })
+              : t('timeline.retryConnectionLost')
       return (
         <p
           className={`dsh-timeline__retry${
@@ -193,21 +201,17 @@ function renderNode(
           }`}
           role="status"
         >
-          {node.state === 'scheduled' ? (
-            <span className="dsh-timeline__retry-shimmer" aria-hidden="true" />
-          ) : null}
-          <span>
-            {node.state === 'cancelled'
-              ? t('timeline.retryCancelled', { attempt: node.attempt })
-              : node.state === 'started'
-                ? t('timeline.retryStarted', { attempt: node.attempt })
-                : node.attempt > 1
-                  ? t('timeline.retryingAttempt', { attempt: node.attempt })
-                  : t('timeline.retryConnectionLost')}
-            {node.message === undefined ? '' : ` — ${node.message}`}
+          <span
+            className="dsh-timeline__retry-shimmer"
+            data-active={node.state === 'scheduled' ? 'true' : 'false'}
+            aria-hidden="true"
+          />
+          <span className="dsh-timeline__retry-message">
+            {node.message === undefined ? retryLabel : `${retryLabel} — ${node.message}`}
           </span>
         </p>
       )
+    }
     case 'workflow':
       return (
         <WorkflowRunCard
