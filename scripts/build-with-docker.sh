@@ -161,16 +161,59 @@ case "$MODE" in
     ;;
 esac
 
+# Locate the VS Code `code` CLI. A `.deb`/`.tar.gz` install does not always put
+# `code` on PATH (unlike the snap, which adds /snap/bin). Check PATH first, then
+# well-known install locations, then the portable/tarball layout. Override with
+# DSH_CODE_CLI to point at any other location.
+find_code_cli() {
+  local c
+  if [ -n "${DSH_CODE_CLI:-}" ]; then
+    if [ -x "$DSH_CODE_CLI" ]; then
+      printf '%s\n' "$DSH_CODE_CLI"
+      return 0
+    fi
+    echo "error: DSH_CODE_CLI='$DSH_CODE_CLI' is not an executable file" >&2
+    return 1
+  fi
+  if c="$(command -v code 2>/dev/null)"; then
+    printf '%s\n' "$c"
+    return 0
+  fi
+  # .deb, snap and user-local installs.
+  for c in \
+    /usr/bin/code \
+    /usr/share/code/bin/code \
+    /snap/bin/code \
+    "$HOME/.local/bin/code"; do
+    if [ -x "$c" ]; then
+      printf '%s\n' "$c"
+      return 0
+    fi
+  done
+  # Portable/tarball installs: <root>/<version>/bin/code.
+  local root
+  for root in "$HOME/apps/vscode" "$HOME/.vscode" "$HOME/.local/share/vscode"; do
+    for c in "$root"/*/bin/code; do
+      if [ -x "$c" ]; then
+        printf '%s\n' "$c"
+        return 0
+      fi
+    done
+  done
+  return 1
+}
+
 if [ "$MODE" = "build" ]; then
   VSIX="$REPO_ROOT/artifacts/jabodsh.vsix"
   if [ ! -f "$VSIX" ]; then
     echo "error: build produced no VSIX at $VSIX" >&2
     exit 1
   fi
-  if ! command -v code >/dev/null 2>&1; then
-    echo "error: 'code' is not on PATH; VSIX is at $VSIX" >&2
+  CODE_CLI="$(find_code_cli)" || {
+    echo "error: could not locate the 'code' CLI; set DSH_CODE_CLI to its path." >&2
+    echo "VSIX is at $VSIX" >&2
     exit 1
-  fi
-  code --install-extension "$VSIX" --force
+  }
+  "$CODE_CLI" --install-extension "$VSIX" --force
   echo "Installed. Run 'Developer: Reload Window' in VS Code to load the new build."
 fi
