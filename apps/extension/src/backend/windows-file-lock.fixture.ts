@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
+import { promises as fs } from 'node:fs'
 import path from 'node:path'
 
 export const fileLockScript = [
@@ -26,6 +27,15 @@ export function spawnFileLocker(file: string): ChildProcess {
   )
 }
 
+/** Light-weight Node process whose current directory prevents renaming `directory` on Windows. */
+export function spawnDirectoryLocker(directory: string): ChildProcess {
+  return spawn(process.execPath, ['-e', "console.log('locked'); setInterval(() => {}, 60_000)"], {
+    cwd: directory,
+    windowsHide: true,
+    shell: false,
+  })
+}
+
 export function waitForFixtureOutput(child: ChildProcess): Promise<void> {
   return new Promise((resolve, reject) => {
     let output = ''
@@ -38,12 +48,17 @@ export function waitForFixtureOutput(child: ChildProcess): Promise<void> {
     const finish = (cause?: Error): void => {
       clearTimeout(timer)
       child.stdout?.off('data', onData)
+      // Keep stdout/stderr draining after the readiness check so a paused
+      // stream cannot delay Node's child `close` event during tree shutdown.
+      child.stdout?.resume()
+      child.stderr?.resume()
       child.off('error', finish)
       child.off('exit', onExit)
       if (cause === undefined) resolve()
       else reject(cause)
     }
     child.stdout?.on('data', onData)
+    child.stderr?.resume()
     child.once('error', finish)
     child.once('exit', onExit)
   })
@@ -54,4 +69,12 @@ export async function stopFixtureChild(child: ChildProcess): Promise<void> {
   const exited = once(child, 'exit')
   child.kill('SIGKILL')
   await exited
+}
+
+/** Returns the errno code when renaming a locked path fails, or `undefined` if rename succeeded. */
+export async function readRenameBlockCode(from: string, to: string): Promise<string | undefined> {
+  return fs.rename(from, to).then(
+    () => undefined,
+    (cause: unknown) => (cause instanceof Error && 'code' in cause ? String(cause.code) : undefined),
+  )
 }

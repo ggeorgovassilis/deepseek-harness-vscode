@@ -12,7 +12,7 @@
 
 ## 上游来源与安装默认
 
-本仓库记录的最新发布包为 `@deepseek-ai/dsh@0.2.2-rc.3`；扩展引导安装默认包为 `@deepseek-ai/dsh@0.2.1-rc.2`，固定源码见下文版本表，隔离验证方法见[质量流程](quality.md)。该记录是仓库的适配快照；npm 远端的 `latest` / `next` 指向需另行查询。发布版本与安装默认分别由 `LATEST_PUBLISHED_DSH_VERSION`、`DEFAULT_INSTALL_DSH_VERSION` 维护；新增适配不自动切换默认，安装和更新均使用经过验证的精确版本，不跟随浮动 dist-tag。默认版本不代表所有能力完成，timed 提问等验收缺口仍见能力矩阵。
+本仓库记录的最新发布包为 `@deepseek-ai/dsh@0.2.2-rc.5`；扩展引导安装默认包为 `@deepseek-ai/dsh@0.2.1-rc.2`，固定源码见下文版本表，隔离验证方法见[质量流程](quality.md)。该记录是仓库的适配快照；npm 远端的 `latest` / `next` 指向需另行查询。发布版本与安装默认分别由 `LATEST_PUBLISHED_DSH_VERSION`、`DEFAULT_INSTALL_DSH_VERSION` 维护；新增适配不自动切换默认，安装和更新均使用经过验证的精确版本，不跟随浮动 dist-tag。默认版本不代表所有能力完成，timed 提问等验收缺口仍见能力矩阵。
 
 历史 Host API 的固定基线是提交 [`47f943859bef60e4160492346772ded9b24f765a`](https://github.com/deepseek-ai/deepseek-harness/tree/47f943859bef60e4160492346772ded9b24f765a)：[RPC map](https://github.com/deepseek-ai/deepseek-harness/blob/47f943859bef60e4160492346772ded9b24f765a/packages/host/apiproxy/src/api/rpc-map.ts)、[events](https://github.com/deepseek-ai/deepseek-harness/blob/47f943859bef60e4160492346772ded9b24f765a/packages/host/apiproxy/src/api/events.ts)、[tool catalog](https://github.com/deepseek-ai/deepseek-harness/tree/47f943859bef60e4160492346772ded9b24f765a/packages/core/tools)。它只证明该 Host API 家族；较新的 Connection/Gateway、typed Remote 和 Session Controller 必须从**目标版本自己的 tag/commit 和实际存在的接口文件**核对。尤其 `0.1.5-rc.2` 与 `0.1.5-rc.3` 的 wire 比较不能引用上述已不存在的旧 RPC 文件；两者被适配器消费的 Session Controller、typed Remote、Connection/Gateway 与工具运行时源码相同，仍保留各自精确身份。
 
@@ -51,6 +51,8 @@
 | `0.2.2-rc.1`                                                                        | `rc221`                                         | 独立精确身份，沿用 alpha.3 wire；批量控制投影、Host 原生任务及受限图片读取；不参与未知版本回退。                                                                  |
 | `0.2.2-rc.2`                                                                        | `rc222`                                         | 独立精确发行版：子代理名称、继续执行/Team 校验、账号通知与插件安装目标校验；不参与未知版本回退。                                                                  |
 | `0.2.2-rc.3`                                                                        | `rc223`                                         | 独立精确 rc.2 wire；发现可选导入插件，读取导入的 V4 会话与 ZIP 缺失附件清单。                                                                                     |
+| `0.2.2-rc.4`                                                                        | `rc224`                                         | 独立精确 rc.3 wire；保留已计费 attempt 用量，并将 `assistant/attempt` 与 `turn/end` 的 `CONTENT_REFUSED` 拒答投影到时间线。                                       |
+| `0.2.2-rc.5`                                                                        | `rc225`                                         | 独立精确 rc.4 wire；承接缺省 `web.searchProvider` 的按模型路由配置，并脱敏 `web/deepseek-search-llm-request` 日志记录。                                           |
 
 `0.1.7-rc.2` 的固定源码是 [tag `dsh-v0.1.7-rc.2`](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.1.7-rc.2)，提交 `477b4f420553e8a52c2fbccc464d7561b239c443`。其他新增版本也必须在 fixture 注明 tag、commit、文件和类型；版本身份、schema、错误词汇、启动参数与能力声明一起核对。
 
@@ -190,6 +192,22 @@ rc.2 到 rc.3 的完整源码比较确认，消费的 Gateway/Connection、typed
 companion 状态及目录读取遵循配置的 RPC 超时（默认 30 秒），等待本地包与语言资源发现；后续包管理器探测使用独立的 10 秒预算。状态查询只在同一当前 backend 和安装状态代次内合并。更换或失去 backend、销毁管理器时取消待处理发现，迟到响应及失败不能覆盖当前观测。客户端状态请求覆盖配置允许的最大 RPC 预算、包管理器探测及回复传递，配置请求采用安装预算。原生测试夹具使用默认 RPC 预算。
 
 脱敏 rc223 fixture 和生产注册测试覆盖精确选择、相邻版本拒绝、取消、畸形/错误响应、批量投影边界、官方导入插件发现、安装目标拒绝与 Schedule 写入不重放。隔离的 stock npm `0.2.2-rc.3` 验证了受管连接、未登录账号流取消、官方插件目录、工作区空白会话复用、计费历史、设置修改/拒绝与模型目录读取。隔离组合显式启用发行包自带的可选导入插件，上传虚构的 format-3 压缩包，验证持久化正文、思考、附件名称及包含缺失附件清单的 ZIP。受限工具图片与原生 Schedule 投递均不发出模型请求；companion 安装/更新/重连、失败恢复与缓存回滚使用真实 pnpm。真实模型执行、已认证 OAuth/通知及独立 VS Code/可访问性验收仍未完成，相关能力保留 `PARTIAL`。
+
+### 第四个候选版本
+
+`0.2.2-rc.4` 固定到 [tag `dsh-v0.2.2-rc.4`](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.2.2-rc.4)，提交 `3f321d32bfe382212a8ed8785c1d47a5a300aa23`。独立 `rc224` Adapter 继承经核对的 rc.3 wire，只接纳这一精确版本，不参与未知版本回退。Node 要求仍为 **>=24.9.0**，引导安装保留 `0.2.1-rc.2`。
+
+rc.3 到 rc.4 的源码核对确认，消费的 Gateway/Connection、typed Remote、Session V4 codec/历史/控制流、Workspace、Job、Schedule、Account、提问、子代理/Team、Plugin Manager、Settings 和 CLI 启动契约保持不变。上游 `llm` 新增 `CONTENT_REFUSED`，`llm-deepseek` 在 Messages 流以 `refusal` 停止时先输出已计费用量再以 `CONTENT_REFUSED` 失败；`assistant/attempt` 保留该已计费用量，实时规约撤回已流式显示的草稿，`turn/end` 将 `CONTENT_REFUSED` 与提供方说明呈现在 `turn-terminal`。上游 Liveshare 的 Electron tunnel 改动不经过本扩展消费边界。
+
+脱敏 rc224 fixture 和跨层时间线测试覆盖精确准入、相邻版本拒绝、V4 `CONTENT_REFUSED` 快照/历史校验、已计费 attempt 用量提取及草稿撤回。隔离的官方 npm `0.2.2-rc.4` 覆盖受管连接、工作区/空白会话复用、计费、设置、官方插件目录、导入与 ZIP 导出、受限工具图片和原生 Schedule 投递（均不发出模型请求）。真实 DeepSeek 模型拒答流、已认证 OAuth/通知及独立 VS Code/可访问性验收仍未完成，相关能力保持 `PARTIAL`。
+
+### 第五个候选版本
+
+`0.2.2-rc.5` 固定到 [tag `dsh-v0.2.2-rc.5`](https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.2.2-rc.5)，提交 `9c2670d3bce5275e0d1610272958121af87787bb`。独立 `rc225` Adapter 继承经核对的 rc.4 wire，只接纳这一精确版本，不参与未知版本回退。Node 要求仍为 **>=24.9.0**，引导安装保留 `0.2.1-rc.2`。
+
+rc.4 到 rc.5 的源码核对确认，消费的 Gateway/Connection、typed Remote、Session V4 codec/历史/控制流、Workspace、Job、Schedule、Account、提问、子代理/Team、Plugin Manager、Settings 和 CLI 启动契约保持不变。上游移除了基础组合中固定的 `web.searchProvider`。显式设置或环境变量优先。缺省时，`deepseek-official` 和 `deepseek-account` 模型路由优先选择 `deepseek-official` 搜索，其他情况优先选择 `deepseek-search-api`。首选提供方不可用时，DSH 要求只有一个可用提供方。`web-search-deepseek` 现支持条目内嵌摘要。Messages 搜索沿用已有的 `web/deepseek-search-llm-request` 会话事件。继承的 Session profile 可以读取该记录，实时投影脱敏 `endpoint` 与 `body`，Markdown 导出跳过该行，JSON/ZIP 导出保留原始日志记录。`settings.describe` 将缺省的 `web.searchProvider` 显示为未覆写，支持实时 `set`/`unset` 往返。
+
+脱敏 rc225 fixture 与测试覆盖精确准入、相邻版本拒绝、V4 `web/deepseek-search-llm-request` 校验/脱敏/导出及 `web` 设置写入与清除恢复。隔离的官方 npm `0.2.2-rc.5` 覆盖受管连接、缺省 `web.searchProvider` 读取及 `set`/`unset` 往返、工作区/空白会话复用、计费、官方插件目录、导入与 ZIP 导出、受限工具图片和原生 Schedule 投递（均不发出模型请求）。真实模型触发的网页搜索、已认证 OAuth/通知及独立 VS Code/可访问性验收仍未完成，相关能力保持 `PARTIAL`。
 
 ### 历史 master 预适配
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import type { AppState, AppStore, DshSettingsSnapshot } from './store.js'
 import {
+  DEFAULT_PERFORMANCE_USAGE,
   DSH_UI_SETTING_PATHS,
   dshUiPreferences,
   findDshSettingsField,
@@ -35,6 +36,7 @@ interface DshSettingsUi {
   readonly newSessionPresetSelectionEnabled: boolean | undefined
   readonly transcriptView: TranscriptViewMode
   readonly performanceUsage: PerformanceUsageMode
+  readonly trajectoryAvailable: boolean
   readonly hostConversationFontSizePx: number | undefined
   readonly conversationFontStyle: CSSProperties | undefined
 }
@@ -401,7 +403,14 @@ export function useDshSettings(input: {
   // roster. Only the host's own roster answer can withdraw the choice.
   const newSessionPresetSelectionEnabled = state.presetSelectionEnabled
   const transcriptView = readyDshUiPreferences?.transcriptView ?? 'standard'
-  const performanceUsage = readyDshUiPreferences?.performanceUsage ?? 'detailed'
+  const performanceUsage = readyDshUiPreferences?.performanceUsage ?? DEFAULT_PERFORMANCE_USAGE
+  const trajectoryPreferences =
+    settingsSnapshotMatchesConnection && dshSettingsSnapshot !== undefined
+      ? (readyDshUiPreferences ?? dshUiPreferences(dshSettingsSnapshot))
+      : undefined
+  const trajectoryAvailable =
+    trajectoryPreferences?.codingToolsEnabled === true ||
+    (trajectoryPreferences?.performanceUsage ?? DEFAULT_PERFORMANCE_USAGE) === 'detailed'
   const hostConversationFontSizePx = readyDshUiPreferences?.fontSize
   const conversationFontStyle =
     hostConversationFontSizePx === undefined
@@ -449,6 +458,7 @@ export function useDshSettings(input: {
     newSessionPresetSelectionEnabled,
     transcriptView,
     performanceUsage,
+    trajectoryAvailable,
     hostConversationFontSizePx,
     conversationFontStyle,
   }
