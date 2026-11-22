@@ -6,10 +6,26 @@ Release entries describe behaviour at that release. `Unreleased` lists changes a
 
 ## Unreleased
 
-- Adds exact DSH `0.2.2-rc.5` support (`9c2670d3bce5275e0d1610272958121af87787bb`), preserving the checked rc.4 contracts alongside route-default `web.searchProvider` settings round-trips and redacted/export-safe `web/deepseek-search-llm-request` log records. Preserves older exact adapters and the guided-install default.
-- 适配 DSH `0.2.2-rc.5`（`9c2670d3bce5275e0d1610272958121af87787bb`），沿用经核对的 rc.4 契约，并支持缺省 `web.searchProvider` 按模型路由配置往返与 `web/deepseek-search-llm-request` 日志记录的脱敏及导出处理；保留旧版独立适配与引导安装默认。
-- Adds exact DSH `0.2.2-rc.4` support (`3f321d32bfe382212a8ed8785c1d47a5a300aa23`), preserving the checked rc.3 Remote and Session V4 contracts alongside `CONTENT_REFUSED` attempt usage accounting, draft withdrawal and `turn/end` error presentation. Preserves older exact adapters and the guided-install default.
-- 适配 DSH `0.2.2-rc.4`（`3f321d32bfe382212a8ed8785c1d47a5a300aa23`），沿用经核对的 rc.3 Remote 与 Session V4 契约，并覆盖 `CONTENT_REFUSED` 的 attempt 用量计费、流式草稿撤回及 `turn/end` 错误展示；保留旧版独立适配与引导安装默认。
+## 0.4.10
+
+### Changes
+
+- **DSH installation and compatibility.** Guided installation now installs and verifies `0.2.2-rc.5` directly. This release adds exact adapters for `0.2.2-rc.4`, `0.2.2-rc.5`, `0.2.3-alpha.1` and `0.2.3-alpha.2`. The stock Alpha.2 npm package starts with the updated Cordis Loader and requires Node.js `^24.22.3 || >=26.13.1`. The update picker excludes the unbootable Alpha.1 npm package.
+- **Completion and input cues.** Optional notifications and bells now cover completed replies, questions and approvals. They respect focus across visible chats. The bell cancels pending playback when you switch conversations or close a chat. Run **JaboDSH: Test Completion Cue** to try it. Local Linux and macOS can use desktop notifications. Windows and remote workspaces use VS Code notifications.
+- **Chat recovery.** Stalled transcript updates recover from the latest Host window. Send and steer actions can reconcile delayed receipts while preserving drafts and avoiding duplicate submissions.
+- **Editor chat.** Rename the current session from the editor title bar with its full title prefilled. The wider history setting also applies to long user messages in the active editor. Trajectory visibility respects the developer tool and detailed usage settings, including the default Detailed mode.
+
+### 更新内容
+
+- **DSH 安装和兼容性。** 引导安装直接安装并验证 `0.2.2-rc.5`。新增对 `0.2.2-rc.4`、`0.2.2-rc.5`、`0.2.3-alpha.1` 和 `0.2.3-alpha.2` 的精确适配。官方 Alpha.2 npm 包通过更新后的 Cordis Loader 正常启动，要求 Node.js `^24.22.3 || >=26.13.1`。更新列表排除了无法启动的 Alpha.1 npm 包。
+- **完成和输入提示。** 回复完成、提问或等待审批时可开启通知或提示音。提醒会检查各个可见聊天的焦点。切换会话或关闭聊天时，会取消尚未播放的完成提示音。可运行 **JaboDSH: Test Completion Cue** 自测。本地 Linux 和 macOS 可使用桌面通知，Windows 和远程工作区使用 VS Code 窗口内通知。
+- **聊天恢复。** 消息更新停滞时会从 Host 最新的会话窗口恢复。发送和插话可核对延迟回执，保留草稿并避免重复提交。
+- **编辑器聊天。** 可从编辑器标题栏重命名当前会话，并预填完整标题。加宽历史设置也会作用于当前编辑器中的长用户消息。轨迹显示遵循开发工具和详细用量设置，并兼容缺省的详细模式。
+
+### PR acknowledgements / PR 致谢
+
+- Thanks to [@ggeorgovassilis](https://github.com/ggeorgovassilis) for updating the architecture diagrams and improving completion and input cues. 感谢更新架构图及改进完成与输入提示。 [#63](https://github.com/Jabofish/deepseek-harness-vscode/pull/63) · [#64](https://github.com/Jabofish/deepseek-harness-vscode/pull/64)
+- Thanks to [@Jabofish](https://github.com/Jabofish) for the DSH adaptation, chat recovery, editor history and naming fixes, and Trajectory fixes. 感谢完成 DSH 适配、聊天恢复、编辑器历史和重命名修复及轨迹显示修复。 [#65](https://github.com/Jabofish/deepseek-harness-vscode/pull/65) · [#59](https://github.com/Jabofish/deepseek-harness-vscode/pull/59) · [#57](https://github.com/Jabofish/deepseek-harness-vscode/pull/57) · [#58](https://github.com/Jabofish/deepseek-harness-vscode/pull/58) · [#61](https://github.com/Jabofish/deepseek-harness-vscode/pull/61) · [#62](https://github.com/Jabofish/deepseek-harness-vscode/pull/62) · [#56](https://github.com/Jabofish/deepseek-harness-vscode/pull/56) · [#60](https://github.com/Jabofish/deepseek-harness-vscode/pull/60)
 
 ## 0.4.9
 

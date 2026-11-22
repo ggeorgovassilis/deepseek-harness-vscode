@@ -51,7 +51,7 @@ For manual installation, download a matching platform VSIX (or the universal pac
 If you used `Direwolf.deepseek-harness-client`, disable or uninstall it before installing JaboDSH to avoid duplicate commands and views. Keep its data if you need its local templates or checkpoints. Existing `dsh.*` settings and commands remain compatible; DSH session data stays in the runtime. Private extension storage, saved editor tabs and Webview preferences do not migrate automatically. Reopen sessions, authorise external connections again, and check editor companion status. See the [migration instructions](https://github.com/Jabofish/deepseek-harness-vscode#switch-from-the-previous-extension).
 
 1. Open the **JaboDSH** view.
-2. If DSH is missing, use the guided installer, select an existing executable, or copy the exact install command shown in the view. The installer shows npm output and verifies the installed version; npm warnings alone do not fail the installation.
+2. If DSH is missing, use the guided installer, select an existing executable, or copy the exact install command shown in the view. Guided installation installs the latest verified DSH release candidate and verifies the npm-installed launcher. The Node.js used by npm must be at least 24.9.0.
 3. Choose or create a workspace, start a session, and send a task.
 
 The Chat view is registered in VS Code's Secondary Side Bar by default (on the right in the default workbench layout). VS Code may keep a previously saved view location after an upgrade.
@@ -60,7 +60,7 @@ Choose **Open in Editor Area** or run **JaboDSH: Open Chat in Editor Area** (`/m
 
 **Open Web UI** uses VS Code's integrated browser by default. To use your system browser, set `dsh.webUi.browser` to `external` in VS Code Settings.
 
-Set `dsh.completionCue` to `notification` or `bell` for a cue after a successful live reply finishes rendering while VS Code is unfocused; the default is `off`. Notifications use VS Code's notification UI. Desktop popups and sound depend on editor, browser and operating system settings.
+Set `dsh.completionCue` in your User or Workspace settings to `notification` or `bell` for a cue after a successful live reply finishes rendering, or when the agent asks a question or waits for an approval, while the chat does not have focus (for example when VS Code is unfocused); the default is `off`. Notifications use the desktop notification service on Linux and macOS, with VS Code's in-window notification as the fallback; Windows and remote workspaces use the in-window notification. The bell plays in the chat and may need one click inside the chat before the first sound. Set `dsh.completionCueWhenFocused` to `true` to cue even while you watch the reply. Run **JaboDSH: Test Completion Cue** to check the configured mode.
 
 To drag a session directly into a split, run **JaboDSH: Open Drag Sessions** to open **JaboDSH Sessions** in Explorer, then drag a session row to an editor edge. The Explorer list is hidden until you run that command.
 
